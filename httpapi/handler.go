@@ -7,8 +7,6 @@ import (
 	s "github.com/StuHelper/stuhelper-search"
 	"net/http"
 	"strconv"
-	"strings"
-	"time"
 )
 
 type Handler struct {
@@ -55,26 +53,6 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		out, e = h.Service.Popular(r.Context(), user, q.Get("kind"), q.Get("cursor"), limit)
 	case "/api/v1/search/my-votes":
 		out, e = h.Service.MyVotes(r.Context(), user, q.Get("cursor"), limit)
-	case "/api/v1/search/statistics", "/api/v1/search/compare":
-		from, err := time.Parse(time.RFC3339, q.Get("from"))
-		if err != nil {
-			fail(w, s.ErrInput)
-			return
-		}
-		to, err := time.Parse(time.RFC3339, q.Get("to"))
-		if err != nil {
-			fail(w, s.ErrInput)
-			return
-		}
-		if r.URL.Path == "/api/v1/search/compare" {
-			if len(q.Get("ids")) > 2048 {
-				fail(w, s.ErrInput)
-				return
-			}
-			out, e = h.Service.Compare(r.Context(), user, strings.Split(q.Get("ids"), ","), from, to)
-		} else {
-			out, e = h.Service.Statistics(r.Context(), user, q.Get("kind"), q.Get("id"), from, to)
-		}
 	default:
 		e = s.ErrNotFound
 	}

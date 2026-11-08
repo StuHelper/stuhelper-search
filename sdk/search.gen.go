@@ -11,58 +11,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/oapi-codegen/runtime"
 )
-
-// Defines values for DimensionLevel.
-const (
-	Level1 DimensionLevel = "level_1"
-	Level2 DimensionLevel = "level_2"
-	Level3 DimensionLevel = "level_3"
-	Level4 DimensionLevel = "level_4"
-	Level5 DimensionLevel = "level_5"
-)
-
-// Valid indicates whether the value is a known member of the DimensionLevel enum.
-func (e DimensionLevel) Valid() bool {
-	switch e {
-	case Level1:
-		return true
-	case Level2:
-		return true
-	case Level3:
-		return true
-	case Level4:
-		return true
-	case Level5:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for DimensionState.
-const (
-	Available    DimensionState = "available"
-	Insufficient DimensionState = "insufficient"
-	NoReviews    DimensionState = "no_reviews"
-)
-
-// Valid indicates whether the value is a known member of the DimensionState enum.
-func (e DimensionState) Valid() bool {
-	switch e {
-	case Available:
-		return true
-	case Insufficient:
-		return true
-	case NoReviews:
-		return true
-	default:
-		return false
-	}
-}
 
 // Defines values for TargetKind.
 const (
@@ -169,42 +120,6 @@ func (e PopularParamsKind) Valid() bool {
 	}
 }
 
-// Defines values for StatisticsParamsKind.
-const (
-	StatisticsParamsKindCourse  StatisticsParamsKind = "course"
-	StatisticsParamsKindTeacher StatisticsParamsKind = "teacher"
-)
-
-// Valid indicates whether the value is a known member of the StatisticsParamsKind enum.
-func (e StatisticsParamsKind) Valid() bool {
-	switch e {
-	case StatisticsParamsKindCourse:
-		return true
-	case StatisticsParamsKindTeacher:
-		return true
-	default:
-		return false
-	}
-}
-
-// Comparison defines model for Comparison.
-type Comparison struct {
-	Items []Statistics `json:"items"`
-}
-
-// Dimension defines model for Dimension.
-type Dimension struct {
-	Level   *DimensionLevel `json:"level,omitempty"`
-	Samples int             `json:"samples"`
-	State   DimensionState  `json:"state"`
-}
-
-// DimensionLevel defines model for Dimension.Level.
-type DimensionLevel string
-
-// DimensionState defines model for Dimension.State.
-type DimensionState string
-
 // Error defines model for Error.
 type Error struct {
 	Code string `json:"code"`
@@ -221,16 +136,6 @@ type Item struct {
 type Page struct {
 	Items      []Item `json:"items"`
 	NextCursor string `json:"next_cursor"`
-}
-
-// Statistics defines model for Statistics.
-type Statistics struct {
-	Courses    int         `json:"courses"`
-	Dimensions []Dimension `json:"dimensions"`
-	From       time.Time   `json:"from"`
-	Samples    int         `json:"samples"`
-	Target     Target      `json:"target"`
-	To         time.Time   `json:"to"`
 }
 
 // Target defines model for Target.
@@ -279,18 +184,6 @@ type SearchParams struct {
 // SearchParamsKind defines parameters for Search.
 type SearchParamsKind string
 
-// CompareParams defines parameters for Compare.
-type CompareParams struct {
-	// Ids 逗号分隔的 2–5 个不同课程 ID
-	Ids string `form:"ids" json:"ids"`
-
-	// From 开始时间，包含
-	From time.Time `form:"from" json:"from"`
-
-	// To 结束时间，不包含；最长 366 天
-	To time.Time `form:"to" json:"to"`
-}
-
 // MyVotesParams defines parameters for MyVotes.
 type MyVotesParams struct {
 	// Cursor cursor
@@ -314,24 +207,6 @@ type PopularParams struct {
 
 // PopularParamsKind defines parameters for Popular.
 type PopularParamsKind string
-
-// StatisticsParams defines parameters for Statistics.
-type StatisticsParams struct {
-	// Kind kind
-	Kind StatisticsParamsKind `form:"kind" json:"kind"`
-
-	// Id id
-	Id string `form:"id" json:"id"`
-
-	// From 开始时间，包含
-	From time.Time `form:"from" json:"from"`
-
-	// To 结束时间，不包含；最长 366 天
-	To time.Time `form:"to" json:"to"`
-}
-
-// StatisticsParamsKind defines parameters for Statistics.
-type StatisticsParamsKind string
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -412,11 +287,6 @@ type ClientInterface interface {
 	// Corresponds with GET /api/v1/search (the `Search` operationId).
 	Search(ctx context.Context, params *SearchParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// Compare 保持输入顺序的课程对比，无权访问任一对象时返回 404
-	//
-	// Corresponds with GET /api/v1/search/compare (the `Compare` operationId).
-	Compare(ctx context.Context, params *CompareParams, reqEditors ...RequestEditorFn) (*http.Response, error)
-
 	// MyVotes 请求人当前有效投票，通过 reviews 公开接口读取
 	//
 	// Corresponds with GET /api/v1/search/my-votes (the `MyVotes` operationId).
@@ -426,11 +296,6 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /api/v1/search/popular (the `Popular` operationId).
 	Popular(ctx context.Context, params *PopularParams, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// Statistics 课程或教师五维统计，教师按课程等权汇总，只返回等级
-	//
-	// Corresponds with GET /api/v1/search/statistics (the `Statistics` operationId).
-	Statistics(ctx context.Context, params *StatisticsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // Search 按当前权限过滤的全站搜索
@@ -438,21 +303,6 @@ type ClientInterface interface {
 // Corresponds with GET /api/v1/search (the `Search` operationId).
 func (c *Client) Search(ctx context.Context, params *SearchParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSearchRequest(c.Server, params)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-// Compare 保持输入顺序的课程对比，无权访问任一对象时返回 404
-//
-// Corresponds with GET /api/v1/search/compare (the `Compare` operationId).
-func (c *Client) Compare(ctx context.Context, params *CompareParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCompareRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -483,21 +333,6 @@ func (c *Client) MyVotes(ctx context.Context, params *MyVotesParams, reqEditors 
 // Corresponds with GET /api/v1/search/popular (the `Popular` operationId).
 func (c *Client) Popular(ctx context.Context, params *PopularParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPopularRequest(c.Server, params)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-// Statistics 课程或教师五维统计，教师按课程等权汇总，只返回等级
-//
-// Corresponds with GET /api/v1/search/statistics (the `Statistics` operationId).
-func (c *Client) Statistics(ctx context.Context, params *StatisticsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewStatisticsRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -582,72 +417,6 @@ func NewSearchRequest(server string, params *SearchParams) (*http.Request, error
 				}
 			}
 
-		}
-
-		if encoded := queryValues.Encode(); encoded != "" {
-			rawQueryFragments = append(rawQueryFragments, encoded)
-		}
-		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
-	}
-
-	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return req, nil
-}
-
-// NewCompareRequest constructs an http.Request for the Compare method
-func NewCompareRequest(server string, params *CompareParams) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/api/v1/search/compare")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	if params != nil {
-		// queryValues collects non-styled parameters (passthrough, JSON)
-		// that are safe to round-trip through url.Values.Encode().
-		queryValues := queryURL.Query()
-		// rawQueryFragments collects pre-encoded query fragments from
-		// styled parameters, preserving literal commas as delimiters
-		// per the OpenAPI spec (e.g. "color=blue,black,brown").
-		var rawQueryFragments []string
-
-		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "ids", params.Ids, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
-			return nil, err
-		} else {
-			for _, qp := range strings.Split(queryFrag, "&") {
-				rawQueryFragments = append(rawQueryFragments, qp)
-			}
-		}
-
-		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "from", params.From, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
-			return nil, err
-		} else {
-			for _, qp := range strings.Split(queryFrag, "&") {
-				rawQueryFragments = append(rawQueryFragments, qp)
-			}
-		}
-
-		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "to", params.To, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
-			return nil, err
-		} else {
-			for _, qp := range strings.Split(queryFrag, "&") {
-				rawQueryFragments = append(rawQueryFragments, qp)
-			}
 		}
 
 		if encoded := queryValues.Encode(); encoded != "" {
@@ -804,80 +573,6 @@ func NewPopularRequest(server string, params *PopularParams) (*http.Request, err
 	return req, nil
 }
 
-// NewStatisticsRequest constructs an http.Request for the Statistics method
-func NewStatisticsRequest(server string, params *StatisticsParams) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/api/v1/search/statistics")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	if params != nil {
-		// queryValues collects non-styled parameters (passthrough, JSON)
-		// that are safe to round-trip through url.Values.Encode().
-		queryValues := queryURL.Query()
-		// rawQueryFragments collects pre-encoded query fragments from
-		// styled parameters, preserving literal commas as delimiters
-		// per the OpenAPI spec (e.g. "color=blue,black,brown").
-		var rawQueryFragments []string
-
-		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "kind", params.Kind, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
-			return nil, err
-		} else {
-			for _, qp := range strings.Split(queryFrag, "&") {
-				rawQueryFragments = append(rawQueryFragments, qp)
-			}
-		}
-
-		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "id", params.Id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
-			return nil, err
-		} else {
-			for _, qp := range strings.Split(queryFrag, "&") {
-				rawQueryFragments = append(rawQueryFragments, qp)
-			}
-		}
-
-		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "from", params.From, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
-			return nil, err
-		} else {
-			for _, qp := range strings.Split(queryFrag, "&") {
-				rawQueryFragments = append(rawQueryFragments, qp)
-			}
-		}
-
-		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "to", params.To, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
-			return nil, err
-		} else {
-			for _, qp := range strings.Split(queryFrag, "&") {
-				rawQueryFragments = append(rawQueryFragments, qp)
-			}
-		}
-
-		if encoded := queryValues.Encode(); encoded != "" {
-			rawQueryFragments = append(rawQueryFragments, encoded)
-		}
-		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
-	}
-
-	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return req, nil
-}
-
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -929,13 +624,6 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /api/v1/search (the `Search` operationId).
 	SearchWithResponse(ctx context.Context, params *SearchParams, reqEditors ...RequestEditorFn) (*SearchResponse, error)
 
-	// CompareWithResponse 保持输入顺序的课程对比，无权访问任一对象时返回 404
-	//
-	// Returns a wrapper object for the known response body format(s).
-	//
-	// Corresponds with GET /api/v1/search/compare (the `Compare` operationId).
-	CompareWithResponse(ctx context.Context, params *CompareParams, reqEditors ...RequestEditorFn) (*CompareResponse, error)
-
 	// MyVotesWithResponse 请求人当前有效投票，通过 reviews 公开接口读取
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -949,13 +637,6 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /api/v1/search/popular (the `Popular` operationId).
 	PopularWithResponse(ctx context.Context, params *PopularParams, reqEditors ...RequestEditorFn) (*PopularResponse, error)
-
-	// StatisticsWithResponse 课程或教师五维统计，教师按课程等权汇总，只返回等级
-	//
-	// Returns a wrapper object for the known response body format(s).
-	//
-	// Corresponds with GET /api/v1/search/statistics (the `Statistics` operationId).
-	StatisticsWithResponse(ctx context.Context, params *StatisticsParams, reqEditors ...RequestEditorFn) (*StatisticsResponse, error)
 }
 
 type SearchResponse struct {
@@ -1028,82 +709,6 @@ func (r SearchResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r SearchResponse) ContentType() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Header.Get("Content-Type")
-	}
-	return ""
-}
-
-type CompareResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *Comparison
-	// JSON400 the response for an HTTP 400 `application/json` response
-	JSON400 *Error
-	// JSON401 the response for an HTTP 401 `application/json` response
-	JSON401 *Error
-	// JSON404 the response for an HTTP 404 `application/json` response
-	JSON404 *Error
-	// JSON503 the response for an HTTP 503 `application/json` response
-	JSON503 *Error
-	// JSON504 the response for an HTTP 504 `application/json` response
-	JSON504 *Error
-}
-
-// GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r CompareResponse) GetJSON200() *Comparison {
-	return r.JSON200
-}
-
-// GetJSON400 returns the response for an HTTP 400 `application/json` response
-func (r CompareResponse) GetJSON400() *Error {
-	return r.JSON400
-}
-
-// GetJSON401 returns the response for an HTTP 401 `application/json` response
-func (r CompareResponse) GetJSON401() *Error {
-	return r.JSON401
-}
-
-// GetJSON404 returns the response for an HTTP 404 `application/json` response
-func (r CompareResponse) GetJSON404() *Error {
-	return r.JSON404
-}
-
-// GetJSON503 returns the response for an HTTP 503 `application/json` response
-func (r CompareResponse) GetJSON503() *Error {
-	return r.JSON503
-}
-
-// GetJSON504 returns the response for an HTTP 504 `application/json` response
-func (r CompareResponse) GetJSON504() *Error {
-	return r.JSON504
-}
-
-// GetBody returns the raw response body bytes
-func (r CompareResponse) GetBody() []byte {
-	return r.Body
-}
-
-// Status returns HTTPResponse.Status
-func (r CompareResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r CompareResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
-func (r CompareResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -1262,82 +867,6 @@ func (r PopularResponse) ContentType() string {
 	return ""
 }
 
-type StatisticsResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *Statistics
-	// JSON400 the response for an HTTP 400 `application/json` response
-	JSON400 *Error
-	// JSON401 the response for an HTTP 401 `application/json` response
-	JSON401 *Error
-	// JSON404 the response for an HTTP 404 `application/json` response
-	JSON404 *Error
-	// JSON503 the response for an HTTP 503 `application/json` response
-	JSON503 *Error
-	// JSON504 the response for an HTTP 504 `application/json` response
-	JSON504 *Error
-}
-
-// GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r StatisticsResponse) GetJSON200() *Statistics {
-	return r.JSON200
-}
-
-// GetJSON400 returns the response for an HTTP 400 `application/json` response
-func (r StatisticsResponse) GetJSON400() *Error {
-	return r.JSON400
-}
-
-// GetJSON401 returns the response for an HTTP 401 `application/json` response
-func (r StatisticsResponse) GetJSON401() *Error {
-	return r.JSON401
-}
-
-// GetJSON404 returns the response for an HTTP 404 `application/json` response
-func (r StatisticsResponse) GetJSON404() *Error {
-	return r.JSON404
-}
-
-// GetJSON503 returns the response for an HTTP 503 `application/json` response
-func (r StatisticsResponse) GetJSON503() *Error {
-	return r.JSON503
-}
-
-// GetJSON504 returns the response for an HTTP 504 `application/json` response
-func (r StatisticsResponse) GetJSON504() *Error {
-	return r.JSON504
-}
-
-// GetBody returns the raw response body bytes
-func (r StatisticsResponse) GetBody() []byte {
-	return r.Body
-}
-
-// Status returns HTTPResponse.Status
-func (r StatisticsResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r StatisticsResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
-func (r StatisticsResponse) ContentType() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Header.Get("Content-Type")
-	}
-	return ""
-}
-
 // SearchWithResponse 按当前权限过滤的全站搜索
 //
 // Returns a wrapper object for the known response body format(s).
@@ -1349,19 +878,6 @@ func (c *ClientWithResponses) SearchWithResponse(ctx context.Context, params *Se
 		return nil, err
 	}
 	return ParseSearchResponse(rsp)
-}
-
-// CompareWithResponse 保持输入顺序的课程对比，无权访问任一对象时返回 404
-//
-// Returns a wrapper object for the known response body format(s).
-//
-// Corresponds with GET /api/v1/search/compare (the `Compare` operationId).
-func (c *ClientWithResponses) CompareWithResponse(ctx context.Context, params *CompareParams, reqEditors ...RequestEditorFn) (*CompareResponse, error) {
-	rsp, err := c.Compare(ctx, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCompareResponse(rsp)
 }
 
 // MyVotesWithResponse 请求人当前有效投票，通过 reviews 公开接口读取
@@ -1390,19 +906,6 @@ func (c *ClientWithResponses) PopularWithResponse(ctx context.Context, params *P
 	return ParsePopularResponse(rsp)
 }
 
-// StatisticsWithResponse 课程或教师五维统计，教师按课程等权汇总，只返回等级
-//
-// Returns a wrapper object for the known response body format(s).
-//
-// Corresponds with GET /api/v1/search/statistics (the `Statistics` operationId).
-func (c *ClientWithResponses) StatisticsWithResponse(ctx context.Context, params *StatisticsParams, reqEditors ...RequestEditorFn) (*StatisticsResponse, error) {
-	rsp, err := c.Statistics(ctx, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseStatisticsResponse(rsp)
-}
-
 // ParseSearchResponse parses an HTTP response from a SearchWithResponse call
 func ParseSearchResponse(rsp *http.Response) (*SearchResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -1419,67 +922,6 @@ func ParseSearchResponse(rsp *http.Response) (*SearchResponse, error) {
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest Page
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON400 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON401 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON404 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON503 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 504:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON504 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseCompareResponse parses an HTTP response from a CompareWithResponse call
-func ParseCompareResponse(rsp *http.Response) (*CompareResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &CompareResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest Comparison
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -1602,67 +1044,6 @@ func ParsePopularResponse(rsp *http.Response) (*PopularResponse, error) {
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest Page
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON400 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON401 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON404 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON503 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 504:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON504 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseStatisticsResponse parses an HTTP response from a StatisticsWithResponse call
-func ParseStatisticsResponse(rsp *http.Response) (*StatisticsResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &StatisticsResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest Statistics
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

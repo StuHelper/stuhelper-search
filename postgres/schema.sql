@@ -4,8 +4,6 @@ CREATE TABLE IF NOT EXISTS search.documents (
  data jsonb NOT NULL, PRIMARY KEY(source,id)
 );
 CREATE INDEX IF NOT EXISTS search_visible_key ON search.documents(source,id) WHERE (data->>'visible')::boolean;
-CREATE INDEX IF NOT EXISTS search_course ON search.documents ((data->>'course_id'));
-CREATE INDEX IF NOT EXISTS search_teachers ON search.documents USING gin ((data->'teacher_ids'));
 CREATE TABLE IF NOT EXISTS search.inbox (
  source text NOT NULL, id text NOT NULL, digest text NOT NULL, PRIMARY KEY(source,id)
 );

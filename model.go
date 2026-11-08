@@ -35,7 +35,6 @@ type Document struct {
 	Visible    bool      `json:"visible"`
 	CourseID   string    `json:"course_id,omitempty"`
 	TeacherIDs []string  `json:"teacher_ids,omitempty"`
-	Ratings    [5]int    `json:"ratings"`
 	At         time.Time `json:"at"`
 	Activity   *[4]int64 `json:"activity,omitempty"`
 }
@@ -52,22 +51,6 @@ type Page struct {
 	Items      []Item `json:"items"`
 	NextCursor string `json:"next_cursor"`
 }
-type Dimension struct {
-	Samples int    `json:"samples"`
-	State   string `json:"state"`
-	Level   string `json:"level,omitempty"`
-}
-type Statistics struct {
-	Target     Target       `json:"target"`
-	From       time.Time    `json:"from"`
-	To         time.Time    `json:"to"`
-	Samples    int          `json:"samples"`
-	Courses    int          `json:"courses"`
-	Dimensions [5]Dimension `json:"dimensions"`
-}
-type Comparison struct {
-	Items []Statistics `json:"items"`
-}
 type Vote struct {
 	Target Target `json:"target"`
 	Choice string `json:"choice"`
@@ -77,11 +60,10 @@ type Votes struct {
 	NextCursor string `json:"next_cursor"`
 }
 type Filter struct {
-	Query, Kind, After  string
-	Limit               int
-	CourseID, TeacherID string
-	From, To            time.Time
-	Activity            bool
+	Query, Kind, After string
+	Limit              int
+	From, To           time.Time
+	Activity           bool
 }
 type Repository interface {
 	Apply(context.Context, Event, string) error
@@ -100,7 +82,6 @@ type Sources interface {
 	MyVotes(context.Context, string, string, int) (Votes, error)
 }
 type Config struct {
-	MinimumSamples     int
 	QueryTimeout       time.Duration
 	HeatWindow         time.Duration
 	HeatWeights        [4]float64

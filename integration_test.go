@@ -88,7 +88,7 @@ func setup(t *testing.T) (*s.Service, *postgres.Repository, *source, *sql.DB) {
 	}
 	f := &source{docs: map[s.Target]s.Document{}, denied: map[string]bool{}, votes: map[string][]s.Vote{}}
 	repo := &postgres.Repository{DB: testDB}
-	svc, e := s.New(repo, f, s.Config{MinimumSamples: 2, QueryTimeout: time.Second, HeatWindow: 7 * 24 * time.Hour, HeatWeights: [4]float64{1, 2, 3, 4}, MinimumHeatSamples: 1, Now: func() time.Time { return now }})
+	svc, e := s.New(repo, f, s.Config{QueryTimeout: time.Second, HeatWindow: 7 * 24 * time.Hour, HeatWeights: [4]float64{1, 2, 3, 4}, MinimumHeatSamples: 1, Now: func() time.Time { return now }})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -248,59 +248,6 @@ func TestVisibilityPaginationAndHotTargets(t *testing.T) {
 		t.Fatal(e)
 	}
 }
-func TestStatisticsRangesThresholdsTeacherWeightingAndComparison(t *testing.T) {
-	svc, _, f, _ := setup(t)
-	ctx := context.Background()
-	for _, id := range []string{"a", "b", "empty"} {
-		add(t, svc, f, doc("catalog", "course", id))
-	}
-	add(t, svc, f, doc("catalog", "teacher", "teacher"))
-	for i := 0; i < 4; i++ {
-		d := doc("reviews", "review", fmt.Sprint(i))
-		d.CourseID = "a"
-		d.TeacherIDs = []string{"teacher"}
-		d.Ratings = [5]int{1, 1, 0, 1, 1}
-		if i == 3 {
-			d.CourseID = "b"
-			d.Ratings = [5]int{5, 5, 0, 5, 5}
-		}
-		add(t, svc, f, d)
-	}
-	from, to := now.Add(-24*time.Hour), now
-	v, e := svc.Statistics(ctx, "u", "teacher", "teacher", from, to)
-	if e != nil || v.Samples != 4 || v.Courses != 2 || v.Dimensions[0].Level != "level_3" || v.Dimensions[2].State != "no_reviews" {
-		t.Fatal(v, e)
-	}
-	v, e = svc.Statistics(ctx, "u", "course", "empty", from, to)
-	if e != nil || v.Samples != 0 || v.Dimensions[0].State != "no_reviews" {
-		t.Fatal(v, e)
-	}
-	v, e = svc.Statistics(ctx, "u", "course", "b", from, to)
-	if e != nil || v.Dimensions[0].State != "insufficient" || v.Dimensions[0].Level != "" {
-		t.Fatal(v, e)
-	}
-	v, e = svc.Statistics(ctx, "u", "teacher", "teacher", now.Add(-30*time.Minute), now)
-	if e != nil || v.Samples != 0 {
-		t.Fatal(v, e)
-	}
-	f.denied["u/0"] = true
-	v, e = svc.Statistics(ctx, "u", "course", "a", from, to)
-	if e != nil || v.Samples != 2 {
-		t.Fatal(v, e)
-	}
-	comparison, e := svc.Compare(ctx, "u", []string{"b", "a"}, from, to)
-	if e != nil || comparison.Items[0].Target.ID != "b" {
-		t.Fatal(comparison, e)
-	}
-	f.denied["u/a"] = true
-	if _, e = svc.Compare(ctx, "u", []string{"a", "b"}, from, to); !errors.Is(e, s.ErrNotFound) {
-		t.Fatal(e)
-	}
-	v, e = svc.Statistics(ctx, "u", "teacher", "teacher", from, to)
-	if e != nil || v.Samples != 1 {
-		t.Fatal("hidden course counted", v, e)
-	}
-}
 func TestMyVotesHTTPAndTimeout(t *testing.T) {
 	svc, _, f, _ := setup(t)
 	d := doc("reviews", "review", "review")
@@ -321,7 +268,7 @@ func TestMyVotesHTTPAndTimeout(t *testing.T) {
 	for _, tc := range []struct {
 		path, user string
 		code       int
-	}{{"/api/v1/search", "", 401}, {"/api/v1/search?limit=101", "u", 400}, {"/api/v1/search?limit=1&limit=2", "u", 400}, {"/api/v1/search", "u", 200}, {"/api/v1/search/statistics?kind=course&id=x&from=bad", "u", 400}} {
+	}{{"/api/v1/search", "", 401}, {"/api/v1/search?limit=101", "u", 400}, {"/api/v1/search?limit=1&limit=2", "u", 400}, {"/api/v1/search", "u", 200}, {"/api/v1/search/statistics", "u", 404}, {"/api/v1/search/compare", "u", 404}} {
 		req := httptest.NewRequest("GET", tc.path, nil)
 		req.Header.Set("X-Test-Principal", tc.user)
 		w := httptest.NewRecorder()
@@ -341,23 +288,9 @@ func TestMyVotesHTTPAndTimeout(t *testing.T) {
 	}
 }
 
-func TestRatingBoundariesAndProjectionFailureRollback(t *testing.T) {
-	svc, _, f, db := setup(t)
+func TestProjectionFailureRollback(t *testing.T) {
+	svc, _, _, db := setup(t)
 	ctx := context.Background()
-	for level := 1; level <= 4; level++ {
-		course := fmt.Sprint("boundary", level)
-		add(t, svc, f, doc("catalog", "course", course))
-		for j := 0; j < 2; j++ {
-			d := doc("reviews", "review", fmt.Sprintf("%s-%d", course, j))
-			d.CourseID = course
-			d.Ratings = [5]int{level + j, 0, 0, 0, 0}
-			add(t, svc, f, d)
-		}
-		v, e := svc.Statistics(ctx, "u", "course", course, now.Add(-24*time.Hour), now)
-		if e != nil || v.Dimensions[0].Level != fmt.Sprint("level_", level+1) {
-			t.Fatal(v, e)
-		}
-	}
 	// Failure after the projection upsert but before inbox insertion rolls back both writes.
 	if _, e := db.Exec(`ALTER TABLE search.inbox ADD CONSTRAINT reject_failure CHECK(id <> 'injected-failure')`); e != nil {
 		t.Fatal(e)
@@ -370,8 +303,69 @@ func TestRatingBoundariesAndProjectionFailureRollback(t *testing.T) {
 	if e := db.QueryRow("SELECT count(*) FROM search.documents WHERE id='rolled-back'").Scan(&n); e != nil || n != 0 {
 		t.Fatal("partial projection", n, e)
 	}
-	d.Ratings[0] = 6
+	d.Revision = 0
 	if e := svc.Consume(ctx, event(d, "invalid")); !errors.Is(e, s.ErrInput) {
 		t.Fatal(e)
+	}
+}
+
+func TestHeatWeightsWindowAndTeachers(t *testing.T) {
+	svc, repo, f, _ := setup(t)
+	ctx := context.Background()
+	for _, id := range []string{"a", "b"} {
+		add(t, svc, f, doc("catalog", "course", id))
+		add(t, svc, f, doc("catalog", "teacher", "teacher-"+id))
+	}
+	for i, id := range []string{"a", "b"} {
+		d := doc("reviews", "activity", "activity-"+id)
+		d.CourseID = id
+		d.TeacherIDs = []string{"teacher-" + id}
+		counts := [4]int64{5, 0, 0, 0}
+		if i == 1 {
+			counts = [4]int64{0, 1, 1, 1}
+		}
+		d.Activity = &counts
+		add(t, svc, f, d)
+	}
+	old := doc("resources", "activity", "old")
+	old.CourseID = "a"
+	old.TeacherIDs = []string{"teacher-a"}
+	old.At = now.Add(-8 * 24 * time.Hour)
+	old.Activity = &[4]int64{1000, 1000, 1000, 1000}
+	add(t, svc, f, old)
+	// b has fewer activities but wins under configured evaluation/favorite/interaction weights.
+	for _, kind := range []string{"course", "teacher"} {
+		page, e := svc.Popular(ctx, "u", kind, "", 20)
+		want := "b"
+		if kind == "teacher" {
+			want = "teacher-b"
+		}
+		if e != nil || len(page.Items) != 2 || page.Items[0].Target.ID != want {
+			t.Fatal(kind, page, e)
+		}
+	}
+	cfg := s.Config{QueryTimeout: time.Second, HeatWindow: 7 * 24 * time.Hour, HeatWeights: [4]float64{1, 0, 0, 0}, MinimumHeatSamples: 1, Now: func() time.Time { return now }}
+	weighted, e := s.New(repo, f, cfg)
+	if e != nil {
+		t.Fatal(e)
+	}
+	page, e := weighted.Popular(ctx, "u", "course", "", 20)
+	if e != nil || len(page.Items) != 2 || page.Items[0].Target.ID != "a" {
+		t.Fatal(page, e)
+	}
+	cfg.HeatWeights = [4]float64{1, 2, 3, 4}
+	cfg.HeatWindow = 9 * 24 * time.Hour
+	wider, e := s.New(repo, f, cfg)
+	if e != nil {
+		t.Fatal(e)
+	}
+	page, e = wider.Popular(ctx, "u", "teacher", "", 20)
+	if e != nil || len(page.Items) != 2 || page.Items[0].Target.ID != "teacher-a" {
+		t.Fatal(page, e)
+	}
+	f.denied["u/teacher-b"] = true
+	page, e = svc.Popular(ctx, "u", "teacher", "", 20)
+	if e != nil || len(page.Items) != 1 || page.Items[0].Target.ID != "teacher-a" {
+		t.Fatal(page, e)
 	}
 }

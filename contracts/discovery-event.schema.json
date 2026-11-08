@@ -99,16 +99,6 @@
           "maxItems": 100,
           "uniqueItems": true
         },
-        "ratings": {
-          "type": "array",
-          "minItems": 5,
-          "maxItems": 5,
-          "items": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 5
-          }
-        },
         "at": {
           "type": "string",
           "format": "date-time"
@@ -130,7 +120,6 @@
         "title",
         "school_id",
         "visible",
-        "ratings",
         "at"
       ]
     }

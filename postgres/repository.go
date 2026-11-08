@@ -90,12 +90,11 @@ func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, 
 	// Parameterized substring search gives literal semantics for %, _ and backslashes.
 	rows, e := r.DB.QueryContext(ctx, `SELECT data FROM search.documents WHERE (data->>'visible')::boolean
  AND source||'/'||id > $1 AND ($2='' OR position(lower($2) in lower(data->>'title'))>0)
- AND ($3='' OR data->'target'->>'kind'=$3) AND ($4='' OR data->>'course_id'=$4)
- AND ($5='' OR (data->'teacher_ids') ? $5)
- AND ($6='' OR (data->>'at')::timestamptz >= NULLIF($6,'')::timestamptz)
- AND ($7='' OR (data->>'at')::timestamptz < NULLIF($7,'')::timestamptz)
- AND (($8 AND data->'activity' IS NOT NULL) OR (NOT $8 AND data->'activity' IS NULL))
- ORDER BY source||'/'||id LIMIT $9`, f.After, f.Query, f.Kind, f.CourseID, f.TeacherID, date(f.From), date(f.To), f.Activity, f.Limit)
+ AND ($3='' OR data->'target'->>'kind'=$3)
+ AND ($4='' OR (data->>'at')::timestamptz >= NULLIF($4,'')::timestamptz)
+ AND ($5='' OR (data->>'at')::timestamptz < NULLIF($5,'')::timestamptz)
+ AND (($6 AND data->'activity' IS NOT NULL) OR (NOT $6 AND data->'activity' IS NULL))
+ ORDER BY source||'/'||id LIMIT $7`, f.After, f.Query, f.Kind, date(f.From), date(f.To), f.Activity, f.Limit)
 	if e != nil {
 		return nil, safe(e)
 	}
