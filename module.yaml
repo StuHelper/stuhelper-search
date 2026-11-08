@@ -1,0 +1,34 @@
+id: search
+version: 0.1.0
+kind: module
+api: 1
+critical: false
+requires:
+  - id: platform
+    api: 1
+optional:
+  - id: catalog
+    api: 1
+  - id: reviews
+    api: 1
+  - id: resources
+    api: 1
+  - id: community
+    api: 1
+capabilities:
+  - search.query
+  - search.statistics
+  - search.projection
+scenario_tests:
+  DS-01:
+    - integration_test.go#TestVisibilityPaginationAndHotTargets
+  DS-02:
+    - integration_test.go#TestStatisticsRangesThresholdsTeacherWeightingAndComparison
+  DS-03:
+    - integration_test.go#TestStatisticsRangesThresholdsTeacherWeightingAndComparison
+  DS-04:
+    - integration_test.go#TestMyVotesHTTPAndTimeout
+  DS-BOUNDARIES:
+    - integration_test.go#TestRatingBoundariesAndProjectionFailureRollback
+  DS-PROJECTION:
+    - integration_test.go#TestProjectionReplayRebuildAndIsolation
