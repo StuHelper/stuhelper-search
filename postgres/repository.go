@@ -91,10 +91,7 @@ func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, 
 	rows, e := r.DB.QueryContext(ctx, `SELECT data FROM search.documents WHERE (data->>'visible')::boolean
  AND source||'/'||id > $1 AND ($2='' OR position(lower($2) in lower(data->>'title'))>0)
  AND ($3='' OR data->'target'->>'kind'=$3)
- AND ($4='' OR (data->>'at')::timestamptz >= NULLIF($4,'')::timestamptz)
- AND ($5='' OR (data->>'at')::timestamptz < NULLIF($5,'')::timestamptz)
- AND (($6 AND data->'activity' IS NOT NULL) OR (NOT $6 AND data->'activity' IS NULL))
- ORDER BY source||'/'||id LIMIT $7`, f.After, f.Query, f.Kind, date(f.From), date(f.To), f.Activity, f.Limit)
+ ORDER BY source||'/'||id LIMIT $4`, f.After, f.Query, f.Kind, f.Limit)
 	if e != nil {
 		return nil, safe(e)
 	}
@@ -113,7 +110,7 @@ func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, 
 	}
 	return out, safe(rows.Err())
 }
-func (r *Repository) Rebuild(ctx context.Context, load func(func([]s.Document) error) error) error {
+func (r *Repository) Rebuild(ctx context.Context, load func(func([]s.Document) error, func([]s.ActivitySnapshot) error) error) error {
 	tx, e := r.DB.BeginTx(ctx, nil)
 	if e != nil {
 		return safe(e)
@@ -124,6 +121,9 @@ func (r *Repository) Rebuild(ctx context.Context, load func(func([]s.Document) e
 	}
 	// Preserve revision tombstones for objects absent from the snapshot, so late events cannot resurrect them.
 	if _, e = tx.ExecContext(ctx, `UPDATE search.documents SET data=jsonb_set(data,'{visible}','false')`); e != nil {
+		return safe(e)
+	}
+	if _, e = tx.ExecContext(ctx, `UPDATE search.activities SET data=jsonb_set(data,'{visible}','false')`); e != nil {
 		return safe(e)
 	}
 	e = load(func(docs []s.Document) error {
@@ -138,6 +138,21 @@ func (r *Repository) Rebuild(ctx context.Context, load func(func([]s.Document) e
 			}
 			if e = put(ctx, tx, d, true); e != nil {
 				return e
+			}
+		}
+		return nil
+	}, func(docs []s.ActivitySnapshot) error {
+		for _, d := range docs {
+			var rev int64
+			err := tx.QueryRowContext(ctx, "SELECT revision FROM search.activities WHERE source=$1 AND id=$2", d.Source, d.ID).Scan(&rev)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if rev > d.Revision {
+				return s.ErrConflict
+			}
+			if err = putActivity(ctx, tx, d, true); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -156,7 +171,7 @@ func (r *Repository) CheckRuntime(ctx context.Context) error {
 	if e != nil || unsafe {
 		return s.ErrUnavailable
 	}
-	for _, table := range []string{"documents", "inbox", "state"} {
+	for _, table := range []string{"documents", "activities", "inbox", "state"} {
 		var ok bool
 		e = r.DB.QueryRowContext(ctx, "SELECT has_table_privilege(current_user,$1,'SELECT') AND has_table_privilege(current_user,$1,'INSERT')", "search."+table).Scan(&ok)
 		if e != nil || !ok {

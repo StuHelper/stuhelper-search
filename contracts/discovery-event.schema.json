@@ -58,8 +58,7 @@
                 "course",
                 "teacher",
                 "review",
-                "resource",
-                "activity"
+                "resource"
               ]
             }
           },
@@ -102,16 +101,6 @@
         "at": {
           "type": "string",
           "format": "date-time"
-        },
-        "activity": {
-          "type": "array",
-          "minItems": 4,
-          "maxItems": 4,
-          "items": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 1000000000
-          }
         }
       },
       "required": [

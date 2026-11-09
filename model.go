@@ -11,6 +11,7 @@ var (
 	ErrUnauthenticated = errors.New("unauthenticated")
 	ErrNotFound        = errors.New("not_found")
 	ErrUnavailable     = errors.New("unavailable")
+	ErrSourceDisabled  = errors.New("source_disabled")
 	ErrConflict        = errors.New("event_conflict")
 )
 
@@ -26,7 +27,6 @@ type Item struct {
 }
 
 // Document is a source-owned public projection snapshot, never review body or identity data.
-// Activity counters cover At's UTC day; separate activity documents avoid overwriting content revisions.
 type Document struct {
 	Target     Target    `json:"target"`
 	Revision   int64     `json:"revision"`
@@ -36,7 +36,6 @@ type Document struct {
 	CourseID   string    `json:"course_id,omitempty"`
 	TeacherIDs []string  `json:"teacher_ids,omitempty"`
 	At         time.Time `json:"at"`
-	Activity   *[4]int64 `json:"activity,omitempty"`
 }
 type Event struct {
 	SpecVersion string    `json:"specversion"`
@@ -62,23 +61,25 @@ type Votes struct {
 type Filter struct {
 	Query, Kind, After string
 	Limit              int
-	From, To           time.Time
-	Activity           bool
 }
 type Repository interface {
 	Apply(context.Context, Event, string) error
 	Candidates(context.Context, Filter) ([]Document, error)
 	// Rebuild holds the projection write lock and atomically publishes all source snapshots.
-	Rebuild(context.Context, func(func([]Document) error) error) error
+	Rebuild(context.Context, func(func([]Document) error, func([]ActivitySnapshot) error) error) error
+	ApplyActivity(context.Context, ActivityEvent, string) error
+	Activities(context.Context, ActivityFilter) ([]ActivitySnapshot, error)
 }
 
 // Sources must use module public APIs and the authenticated principal. Never read source tables.
 // Current returns current readable metadata; false includes deletion, withdrawal and revoked access.
 type Sources interface {
 	Current(context.Context, string, Target) (Document, bool, error)
-	// Snapshot returns at most limit records, including tombstones, using a consistent source snapshot.
-	// A nonempty cursor must advance. Empty next marks the end. Missing source is an error.
-	Snapshot(context.Context, string, string, int) ([]Document, string, error)
+	// DiscoverySnapshot returns at most limit records, including tombstones, using a consistent source snapshot.
+	// A nonempty cursor must advance. Empty next marks the end. Disabled sources return ErrSourceDisabled.
+	DiscoverySnapshot(context.Context, string, string, int) ([]Document, string, error)
+	ActivitySnapshot(context.Context, string, time.Time, time.Time, string, int) ([]ActivitySnapshot, string, error)
+	CurrentActivity(context.Context, string, string, string) (ActivitySnapshot, bool, error)
 	MyVotes(context.Context, string, string, int) (Votes, error)
 }
 type Config struct {

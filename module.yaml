@@ -13,6 +13,8 @@ optional:
     api: 1
   - id: resources
     api: 1
+  - id: favorites
+    api: 1
   - id: community
     api: 1
 capabilities:
@@ -24,8 +26,12 @@ scenario_tests:
   DS-04:
     - integration_test.go#TestMyVotesHTTPAndTimeout
   DS-05:
-    - integration_test.go#TestHeatWeightsWindowAndTeachers
+    - activity_test.go#TestHeatWeightsWindowAndTeachers
+    - activity_test.go#TestActivityOwnership
   DS-06:
     - integration_test.go#TestProjectionFailureRollback
+    - activity_test.go#TestActivityReplayAndRebuild
   DS-07:
     - integration_test.go#TestProjectionReplayRebuildAndIsolation
+    - activity_test.go#TestActivityReplayAndRebuild
+    - activity_test.go#TestActivitySnapshotPaginationAndMigration

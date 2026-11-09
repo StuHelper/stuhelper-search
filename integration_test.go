@@ -20,11 +20,14 @@ import (
 var now = time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
 
 type source struct {
-	docs   map[s.Target]s.Document
-	denied map[string]bool
-	fail   bool
-	slow   bool
-	votes  map[string][]s.Vote
+	docs         map[s.Target]s.Document
+	activities   map[string]s.ActivitySnapshot
+	disabled     map[string]bool
+	activityFail string
+	denied       map[string]bool
+	fail         bool
+	slow         bool
+	votes        map[string][]s.Vote
 }
 
 func (f *source) Current(ctx context.Context, user string, t s.Target) (s.Document, bool, error) {
@@ -38,7 +41,7 @@ func (f *source) Current(ctx context.Context, user string, t s.Target) (s.Docume
 	d, ok := f.docs[t]
 	return d, ok && !f.denied[user+"/"+t.ID], nil
 }
-func (f *source) Snapshot(ctx context.Context, src, cursor string, limit int) ([]s.Document, string, error) {
+func (f *source) DiscoverySnapshot(ctx context.Context, src, cursor string, limit int) ([]s.Document, string, error) {
 	if f.fail {
 		return nil, "", errors.New("snapshot unavailable")
 	}
@@ -86,7 +89,7 @@ func setup(t *testing.T) (*s.Service, *postgres.Repository, *source, *sql.DB) {
 	if e = postgres.Migrate(context.Background(), testDB); e != nil {
 		t.Fatal(e)
 	}
-	f := &source{docs: map[s.Target]s.Document{}, denied: map[string]bool{}, votes: map[string][]s.Vote{}}
+	f := &source{activities: map[string]s.ActivitySnapshot{}, disabled: map[string]bool{}, docs: map[s.Target]s.Document{}, denied: map[string]bool{}, votes: map[string][]s.Vote{}}
 	repo := &postgres.Repository{DB: testDB}
 	svc, e := s.New(repo, f, s.Config{QueryTimeout: time.Second, HeatWindow: 7 * 24 * time.Hour, HeatWeights: [4]float64{1, 2, 3, 4}, MinimumHeatSamples: 1, Now: func() time.Time { return now }})
 	if e != nil {
@@ -175,7 +178,7 @@ func TestProjectionReplayRebuildAndIsolation(t *testing.T) {
 	if e = repo.CheckRuntime(ctx); e == nil {
 		t.Fatal("migration owner accepted")
 	}
-	_, e = db.Exec(`CREATE ROLE search_runtime NOLOGIN; GRANT USAGE ON SCHEMA search TO search_runtime; GRANT SELECT,INSERT,UPDATE ON search.documents,search.state TO search_runtime; GRANT SELECT,INSERT ON search.inbox TO search_runtime; CREATE SCHEMA source_private; CREATE TABLE source_private.secret(id int)`)
+	_, e = db.Exec(`CREATE ROLE search_runtime NOLOGIN; GRANT USAGE ON SCHEMA search TO search_runtime; GRANT SELECT,INSERT,UPDATE ON search.documents,search.activities,search.state TO search_runtime; GRANT SELECT,INSERT ON search.inbox TO search_runtime; CREATE SCHEMA source_private; CREATE TABLE source_private.secret(id int)`)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -226,10 +229,7 @@ func TestVisibilityPaginationAndHotTargets(t *testing.T) {
 	if e != nil || len(p.Items) != 0 {
 		t.Fatal("stale index leaked", p, e)
 	}
-	activity := doc("catalog", "activity", "c/day")
-	activity.CourseID = "c"
-	activity.Activity = &[4]int64{3, 0, 0, 0}
-	add(t, svc, f, activity)
+	addActivity(t, svc, f, activity("catalog", "course", "c", "2026-11-09", map[string]int64{"views": 3}))
 	p, e = svc.Popular(ctx, "u", "course", "", 20)
 	if e != nil || len(p.Items) != 1 || p.Items[0].Target.ID != "c" {
 		t.Fatal(p, e)
@@ -309,67 +309,5 @@ func TestProjectionFailureRollback(t *testing.T) {
 	d.Revision = 0
 	if e := svc.Consume(ctx, event(d, "invalid")); !errors.Is(e, s.ErrInput) {
 		t.Fatal(e)
-	}
-}
-
-// DS-05：热度配置控制权重和时间窗口，热门教师按当前权限过滤。
-func TestHeatWeightsWindowAndTeachers(t *testing.T) {
-	svc, repo, f, _ := setup(t)
-	ctx := context.Background()
-	for _, id := range []string{"a", "b"} {
-		add(t, svc, f, doc("catalog", "course", id))
-		add(t, svc, f, doc("catalog", "teacher", "teacher-"+id))
-	}
-	for i, id := range []string{"a", "b"} {
-		d := doc("reviews", "activity", "activity-"+id)
-		d.CourseID = id
-		d.TeacherIDs = []string{"teacher-" + id}
-		counts := [4]int64{5, 0, 0, 0}
-		if i == 1 {
-			counts = [4]int64{0, 1, 1, 1}
-		}
-		d.Activity = &counts
-		add(t, svc, f, d)
-	}
-	old := doc("resources", "activity", "old")
-	old.CourseID = "a"
-	old.TeacherIDs = []string{"teacher-a"}
-	old.At = now.Add(-8 * 24 * time.Hour)
-	old.Activity = &[4]int64{1000, 1000, 1000, 1000}
-	add(t, svc, f, old)
-	// b has fewer activities but wins under configured evaluation/favorite/interaction weights.
-	for _, kind := range []string{"course", "teacher"} {
-		page, e := svc.Popular(ctx, "u", kind, "", 20)
-		want := "b"
-		if kind == "teacher" {
-			want = "teacher-b"
-		}
-		if e != nil || len(page.Items) != 2 || page.Items[0].Target.ID != want {
-			t.Fatal(kind, page, e)
-		}
-	}
-	cfg := s.Config{QueryTimeout: time.Second, HeatWindow: 7 * 24 * time.Hour, HeatWeights: [4]float64{1, 0, 0, 0}, MinimumHeatSamples: 1, Now: func() time.Time { return now }}
-	weighted, e := s.New(repo, f, cfg)
-	if e != nil {
-		t.Fatal(e)
-	}
-	page, e := weighted.Popular(ctx, "u", "course", "", 20)
-	if e != nil || len(page.Items) != 2 || page.Items[0].Target.ID != "a" {
-		t.Fatal(page, e)
-	}
-	cfg.HeatWeights = [4]float64{1, 2, 3, 4}
-	cfg.HeatWindow = 9 * 24 * time.Hour
-	wider, e := s.New(repo, f, cfg)
-	if e != nil {
-		t.Fatal(e)
-	}
-	page, e = wider.Popular(ctx, "u", "teacher", "", 20)
-	if e != nil || len(page.Items) != 2 || page.Items[0].Target.ID != "teacher-a" {
-		t.Fatal(page, e)
-	}
-	f.denied["u/teacher-b"] = true
-	page, e = svc.Popular(ctx, "u", "teacher", "", 20)
-	if e != nil || len(page.Items) != 1 || page.Items[0].Target.ID != "teacher-a" {
-		t.Fatal(page, e)
 	}
 }

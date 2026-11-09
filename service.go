@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -40,7 +41,7 @@ func New(repo Repository, sources Sources, c Config) (*Service, error) {
 	return &Service{repo, sources, c}, nil
 }
 func validTarget(t Target) bool {
-	return len(t.ID) > 0 && len(t.ID) <= 200 && !strings.ContainsRune(t.ID, 0) && ((t.Kind == "activity" && (t.Source == "catalog" || t.Source == "reviews" || t.Source == "resources")) || (t.Source == "catalog" && (t.Kind == "course" || t.Kind == "teacher")) || (t.Source == "reviews" && t.Kind == "review") || (t.Source == "resources" && t.Kind == "resource"))
+	return len(t.ID) > 0 && len(t.ID) <= 200 && !strings.ContainsRune(t.ID, 0) && ((t.Source == "catalog" && (t.Kind == "course" || t.Kind == "teacher")) || (t.Source == "reviews" && t.Kind == "review") || (t.Source == "resources" && t.Kind == "resource"))
 }
 func Validate(d Document) error {
 	if !validTarget(d.Target) || d.Revision < 1 || len(d.Title) > 1000 || !utf8.ValidString(d.Title) || len(d.SchoolID) > 200 || len(d.TeacherIDs) > 100 || d.At.IsZero() {
@@ -62,16 +63,7 @@ func Validate(d Document) error {
 	if d.Visible && d.Target.Kind == "review" && d.CourseID == "" {
 		return ErrInput
 	}
-	if (d.Activity != nil) != (d.Target.Kind == "activity") {
-		return ErrInput
-	}
-	if d.Activity != nil {
-		for _, n := range d.Activity {
-			if n < 0 || n > 1000000000 {
-				return ErrInput
-			}
-		}
-	}
+
 	return nil
 }
 func (s *Service) Consume(ctx context.Context, e Event) error {
@@ -93,14 +85,17 @@ func (s *Service) Consume(ctx context.Context, e Event) error {
 func (s *Service) Rebuild(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	return s.repo.Rebuild(ctx, func(put func([]Document) error) error {
+	return s.repo.Rebuild(ctx, func(put func([]Document) error, putActivity func([]ActivitySnapshot) error) error {
 		for _, source := range []string{"catalog", "reviews", "resources"} {
 			cursor := ""
 			for pages := 0; ; pages++ {
 				if pages >= 10000 {
 					return ErrUnavailable
 				}
-				docs, next, e := s.sources.Snapshot(ctx, source, cursor, 100)
+				docs, next, e := s.sources.DiscoverySnapshot(ctx, source, cursor, 100)
+				if pages == 0 && errors.Is(e, ErrSourceDisabled) {
+					break
+				}
 				if e != nil {
 					return e
 				}
@@ -121,7 +116,7 @@ func (s *Service) Rebuild(ctx context.Context) error {
 				cursor = next
 			}
 		}
-		return nil
+		return s.rebuildActivities(ctx, putActivity)
 	})
 }
 func key(d Document) string  { return d.Target.Source + "/" + d.Target.ID }
@@ -251,51 +246,52 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 		samples int64
 	}
 	scores := map[Target]*ranked{}
-	now := s.config.Now()
-	f := Filter{Activity: true, From: now.Add(-s.config.HeatWindow), To: now, Limit: 100}
+	from, to := s.activityWindow()
+	f := ActivityFilter{Kind: kind, From: from, To: to, Limit: 100}
 	for scanned := 0; ; {
-		docs, e := s.repo.Candidates(ctx, f)
+		docs, e := s.repo.Activities(ctx, f)
 		if e != nil {
 			return out, e
 		}
 		for _, d := range docs {
 			scanned++
 			if scanned > 10000 {
-				return out, upstreamError(ctx)
+				return out, ErrUnavailable
 			}
-			f.After = key(d)
-			live, ok, e := s.current(ctx, user, d)
-			if e != nil {
-				return out, e
-			}
-			if !ok || live.Activity == nil {
+			f.After = d.Source + "/" + d.ID
+			live, ok, e := s.sources.CurrentActivity(ctx, user, d.Source, d.ID)
+			if errors.Is(e, ErrSourceDisabled) {
 				continue
 			}
-			ids := []string{live.CourseID}
-			if kind == "teacher" {
-				ids = live.TeacherIDs
+			if e != nil {
+				return out, upstreamError(ctx)
 			}
-			for _, id := range ids {
-				if id == "" {
-					continue
-				}
-				t := Target{"catalog", id, kind}
-				v := scores[t]
-				if v == nil {
-					v = &ranked{}
-					v.d.Target = t
-					scores[t] = v
-				}
-				for i, n := range *live.Activity {
-					v.score += float64(n) * s.config.HeatWeights[i]
-					v.samples += n
-				}
+			if !ok {
+				continue
+			}
+			if ValidateActivity(live) != nil || live.Source != d.Source || live.ID != d.ID || live.Target != d.Target || live.Day != d.Day {
+				return out, ErrUnavailable
+			}
+			if !live.Visible || live.Revision != d.Revision {
+				continue
+			}
+			v := scores[d.Target]
+			if v == nil {
+				v = &ranked{}
+				v.d.Target = d.Target
+				scores[d.Target] = v
+			}
+			for i, name := range []string{"views", "reviews", "favorites", "interactions"} {
+				n := live.Metrics[name]
+				v.score += float64(n) * s.config.HeatWeights[i]
+				v.samples += n
 			}
 		}
 		if len(docs) < 100 {
 			break
 		}
 	}
+
 	rows := []ranked{}
 	for t, v := range scores {
 		if v.samples < int64(s.config.MinimumHeatSamples) {
