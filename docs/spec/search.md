@@ -71,6 +71,12 @@ relay、生产模块 outbox 与公开接口适配器由 backend 及来源负责�
 
 ## 验证范围
 
-scenario_tests 登记 DS-01、DS-04，以及热度配置和投影事务场景。集成测试使用隔离 PostgreSQL，覆盖权限过滤、分页、热度权重与窗口、热门教师、当前投票、并发去重、旧修订、重建回滚及运行身份越权拒绝。
+scenario_tests 登记 DS-01、DS-04 至 DS-07。集成测试使用隔离 PostgreSQL，覆盖权限过滤、分页、热度权重与窗口、热门教师、当前投票、并发去重、旧修订、重建回滚及运行身份越权拒绝。
+
+| 场景 | 验收结果 | 测试函数 |
+| --- | --- | --- |
+| DS-05：热度配置 | 权重和时间窗口影响热门排序，热门教师按当前权限过滤 | TestHeatWeightsWindowAndTeachers |
+| DS-06：投影写入失败 | 投影与 inbox 事务整体回滚，不保留部分写入 | TestProjectionFailureRollback |
+| DS-07：重复乱序与重建 | 重复事件去重，旧修订不覆盖新状态，重建失败回滚，运行身份越权被拒绝 | TestProjectionReplayRebuildAndIsolation |
 
 2026-11-09 在隔离 PostgreSQL 18.6 上执行完整 make check，通过 SDK 一致性、仓库边界、文档、gofmt、vet、race 测试、构建及工作流检查。真实账号、跨模块 relay、来源接口适配器与生产部署均未验收。

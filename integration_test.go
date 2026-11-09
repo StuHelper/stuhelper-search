@@ -104,6 +104,8 @@ func add(t *testing.T, svc *s.Service, f *source, d s.Document) {
 		t.Fatal(e)
 	}
 }
+
+// DS-07：重复事件去重，乱序旧修订不覆盖新状态，重建保持原子性与权限隔离。
 func TestProjectionReplayRebuildAndIsolation(t *testing.T) {
 	svc, repo, f, db := setup(t)
 	ctx := context.Background()
@@ -288,6 +290,7 @@ func TestMyVotesHTTPAndTimeout(t *testing.T) {
 	}
 }
 
+// DS-06：投影写入失败时事务回滚，不保留部分业务写入。
 func TestProjectionFailureRollback(t *testing.T) {
 	svc, _, _, db := setup(t)
 	ctx := context.Background()
@@ -309,6 +312,7 @@ func TestProjectionFailureRollback(t *testing.T) {
 	}
 }
 
+// DS-05：热度配置控制权重和时间窗口，热门教师按当前权限过滤。
 func TestHeatWeightsWindowAndTeachers(t *testing.T) {
 	svc, repo, f, _ := setup(t)
 	ctx := context.Background()

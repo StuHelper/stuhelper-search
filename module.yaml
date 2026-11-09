@@ -23,9 +23,9 @@ scenario_tests:
     - integration_test.go#TestVisibilityPaginationAndHotTargets
   DS-04:
     - integration_test.go#TestMyVotesHTTPAndTimeout
-  DS-HEAT:
+  DS-05:
     - integration_test.go#TestHeatWeightsWindowAndTeachers
-  DS-TRANSACTION:
+  DS-06:
     - integration_test.go#TestProjectionFailureRollback
-  DS-PROJECTION:
+  DS-07:
     - integration_test.go#TestProjectionReplayRebuildAndIsolation
