@@ -32,6 +32,7 @@ scenario_tests:
     - integration_test.go#TestProjectionFailureRollback
     - activity_test.go#TestActivityReplayAndRebuild
   DS-07:
+    - integration_test.go#TestContentDocumentKinds
     - integration_test.go#TestProjectionReplayRebuildAndIsolation
     - activity_test.go#TestActivityReplayAndRebuild
-    - activity_test.go#TestActivitySnapshotPaginationAndMigration
+    - activity_test.go#TestActivitySnapshotPagination

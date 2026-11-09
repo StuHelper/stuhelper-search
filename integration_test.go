@@ -8,6 +8,7 @@ import (
 	s "github.com/StuHelper/stuhelper-search"
 	"github.com/StuHelper/stuhelper-search/httpapi"
 	"github.com/StuHelper/stuhelper-search/postgres"
+	"github.com/jackc/pgx/v5/pgconn"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -309,5 +310,56 @@ func TestProjectionFailureRollback(t *testing.T) {
 	d.Revision = 0
 	if e := svc.Consume(ctx, event(d, "invalid")); !errors.Is(e, s.ErrInput) {
 		t.Fatal(e)
+	}
+}
+
+// DS-07: Content types and their owning sources are enforced by both the service and the database.
+func TestContentDocumentKinds(t *testing.T) {
+	svc, _, f, db := setup(t)
+	for _, target := range []s.Target{{Source: "catalog", Kind: "course", ID: "course"}, {Source: "catalog", Kind: "teacher", ID: "teacher"}, {Source: "reviews", Kind: "review", ID: "review"}, {Source: "resources", Kind: "resource", ID: "resource"}} {
+		d := doc(target.Source, target.Kind, target.ID)
+		if target.Kind == "review" {
+			d.CourseID = "course"
+		}
+		add(t, svc, f, d)
+	}
+	for _, tc := range []struct{ source, kind string }{
+		{"catalog", `"activity"`}, {"catalog", `"unknown"`}, {"catalog", `null`}, {"catalog", `""`}, {"catalog", `"review"`}, {"reviews", `"course"`}, {"resources", `"teacher"`}, {"favorites", `"resource"`},
+	} {
+		t.Run(tc.source+tc.kind, func(t *testing.T) {
+			payload := fmt.Sprintf(`{"target":{"kind":%s}}`, tc.kind)
+			_, err := db.Exec(`INSERT INTO search.documents(source,id,revision,data) VALUES($1,'invalid',1,$2)`, tc.source, payload)
+			var pgErr *pgconn.PgError
+			if !errors.As(err, &pgErr) || pgErr.Code != "23514" || pgErr.ConstraintName != "documents_content_kind" {
+				t.Fatalf("expected content kind constraint: %v", err)
+			}
+			if tc.kind != "null" {
+				kind := strings.Trim(tc.kind, `"`)
+				if err := s.Validate(doc(tc.source, kind, "invalid")); !errors.Is(err, s.ErrInput) {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+	for _, payload := range []string{`{}`, `{"target":{}}`, `{"target":null}`} {
+		_, err := db.Exec(`INSERT INTO search.documents(source,id,revision,data) VALUES('catalog','missing-kind',1,$1)`, payload)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+			t.Fatalf("missing kind accepted: %v", err)
+		}
+	}
+	var count int
+	if err := db.QueryRow("SELECT count(*) FROM search.documents").Scan(&count); err != nil || count != 4 {
+		t.Fatal(count, err)
+	}
+	if err := postgres.Migrate(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	var ready bool
+	if err := db.QueryRow("SELECT ready FROM search.state WHERE id").Scan(&ready); err != nil || !ready {
+		t.Fatal(ready, err)
+	}
+	if err := db.QueryRow("SELECT count(*) FROM search.documents").Scan(&count); err != nil || count != 4 {
+		t.Fatal(count, err)
 	}
 }

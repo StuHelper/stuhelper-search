@@ -1,7 +1,12 @@
 CREATE SCHEMA IF NOT EXISTS search;
 CREATE TABLE IF NOT EXISTS search.documents (
  source text NOT NULL, id text NOT NULL, revision bigint NOT NULL CHECK(revision>0),
- data jsonb NOT NULL, PRIMARY KEY(source,id)
+ data jsonb NOT NULL, PRIMARY KEY(source,id),
+ CONSTRAINT documents_content_kind CHECK ((
+   (source='catalog' AND data->'target'->>'kind' IN ('course','teacher'))
+   OR (source='reviews' AND data->'target'->>'kind'='review')
+   OR (source='resources' AND data->'target'->>'kind'='resource')
+ ) IS TRUE)
 );
 CREATE INDEX IF NOT EXISTS search_visible_key ON search.documents(source,id) WHERE (data->>'visible')::boolean;
 CREATE TABLE IF NOT EXISTS search.inbox (
@@ -18,7 +23,3 @@ CREATE TABLE IF NOT EXISTS search.activities (
 CREATE INDEX IF NOT EXISTS search_activity_window ON search.activities(kind,day);
 REVOKE ALL ON SCHEMA search FROM PUBLIC;
 REVOKE ALL ON ALL TABLES IN SCHEMA search FROM PUBLIC;
-
--- Activity projections are rebuildable; remove obsolete rows from the content index.
-WITH removed AS (DELETE FROM search.documents WHERE data->'target'->>'kind'='activity' RETURNING 1)
-UPDATE search.state SET ready=false WHERE EXISTS(SELECT 1 FROM removed);

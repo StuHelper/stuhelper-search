@@ -56,7 +56,7 @@ CurrentActivity 按请求人检查来源活动当前可见性与修订，Current
 
 重建持有投影写锁，relay 可重试超时消费；来源快照事务应独立于 relay 确认，避免互相等待。内容与活动投影在同一事务发布，任一已启用来源失败时全部回滚。缺失活动保留不可见墓碑，阻止旧修订重新计数。
 
-迁移删除内容索引中的旧活动记录并关闭查询就绪状态，随后通过来源日快照重建。运行代码只消费独立活动事件，活动与内容使用独立表。
+search.documents 只保存 catalog 的 course、teacher，reviews 的 review，以及 resources 的 resource。服务层与数据库均校验类型和来源，缺失或非法类型拒绝写入。热门活动由独立事件写入 search.activities。
 
 重建与查询使用 PostgreSQL 事务隔离，查询保留旧的已提交投影，只有完整重建才发布新投影。失败整体回滚，低于已消费修订的快照拒绝。缺失对象保留不可见墓碑，延迟到达的旧事件无法复活内容。
 
@@ -116,6 +116,6 @@ scenario_tests 登记 DS-01、DS-04 至 DS-07。集成测试使用隔离 Postgre
 | --- | --- | --- |
 | DS-05：热度配置 | 多来源汇总、来源缺失、权重、UTC 窗口、最低样本量及权限生效，越权指标拒绝 | TestHeatWeightsWindowAndTeachers、TestActivityOwnership |
 | DS-06：投影写入失败 | 投影与 inbox 事务整体回滚，不保留部分写入 | TestProjectionFailureRollback、TestActivityReplayAndRebuild |
-| DS-07：重复乱序与重建 | 重复事件去重，旧修订不覆盖新状态，重建失败回滚，运行身份越权被拒绝 | TestProjectionReplayRebuildAndIsolation、TestActivityReplayAndRebuild、TestActivitySnapshotPaginationAndMigration |
+| DS-07：重复乱序与重建 | 重复事件去重，旧修订不覆盖新状态，重建失败回滚，运行身份越权被拒绝，内容类型受数据库约束 | TestContentDocumentKinds、TestProjectionReplayRebuildAndIsolation、TestActivityReplayAndRebuild、TestActivitySnapshotPagination |
 
 2026-11-09 在隔离 PostgreSQL 18.6 上执行完整 make check，通过 SDK 一致性、仓库边界、文档、gofmt、vet、race 测试、构建及工作流检查。真实账号、跨模块 relay、来源接口适配器与生产部署均未验收。

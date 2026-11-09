@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	s "github.com/StuHelper/stuhelper-search"
-	"github.com/StuHelper/stuhelper-search/postgres"
 	"sort"
 	"sync"
 	"testing"
@@ -249,8 +248,8 @@ func TestActivityReplayAndRebuild(t *testing.T) {
 	}
 }
 
-// DS-07: Activity reconstruction traverses multiple bounded pages and drops obsolete content activity rows.
-func TestActivitySnapshotPaginationAndMigration(t *testing.T) {
+// DS-07: Activity reconstruction traverses multiple bounded pages.
+func TestActivitySnapshotPagination(t *testing.T) {
 	svc, _, f, db := setup(t)
 	ctx := context.Background()
 	for i := 0; i < 105; i++ {
@@ -263,20 +262,5 @@ func TestActivitySnapshotPaginationAndMigration(t *testing.T) {
 	var count int
 	if e := db.QueryRow("SELECT count(*) FROM search.activities WHERE (data->>'visible')::boolean").Scan(&count); e != nil || count != 105 {
 		t.Fatal(count, e)
-	}
-	if _, e := db.Exec(`INSERT INTO search.documents(source,id,revision,data) VALUES('catalog','legacy',1,'{"target":{"kind":"activity"},"visible":true}')`); e != nil {
-		t.Fatal(e)
-	}
-	if e := postgres.Migrate(ctx, db); e != nil {
-		t.Fatal(e)
-	}
-	if e := db.QueryRow("SELECT count(*) FROM search.documents WHERE id='legacy'").Scan(&count); e != nil || count != 0 {
-		t.Fatal(count, e)
-	}
-	if _, e := svc.Popular(ctx, "u", "course", "", 10); !errors.Is(e, s.ErrUnavailable) {
-		t.Fatal("rebuild must precede readiness", e)
-	}
-	if e := svc.Rebuild(ctx); e != nil {
-		t.Fatal(e)
 	}
 }
