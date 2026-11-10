@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	s "github.com/StuHelper/stuhelper-search"
+	"github.com/StuHelper/stuhelper-search/postgres"
 	"testing"
 )
 
@@ -69,5 +70,34 @@ func TestSchoolSearchCodesNamesAliasesCurrentRightsAndRebuild(t *testing.T) {
 	f.fail = true
 	if _, e = svc.Search(ctx, "u", "10006", "school", "", 20); !errors.Is(e, s.ErrUnavailable) {
 		t.Fatal("dependency failure", e)
+	}
+}
+
+func TestSchoolProjectionMigrationPreservesExistingDocuments(t *testing.T) {
+	svc, repo, f, db := setup(t)
+	ctx := context.Background()
+	course := doc("catalog", "course", "kept-course")
+	add(t, svc, f, course)
+	// Model the pre-school constraint on the same persisted data.
+	_, e := db.Exec(`ALTER TABLE search.documents DROP CONSTRAINT documents_content_kind; ALTER TABLE search.documents ADD CONSTRAINT documents_content_kind CHECK (((source='catalog' AND data->'target'->>'kind' IN ('course','teacher')) OR (source='reviews' AND data->'target'->>'kind'='review') OR (source='resources' AND data->'target'->>'kind'='resource')) IS TRUE)`)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = postgres.Migrate(ctx, db); e != nil {
+		t.Fatal(e)
+	}
+	var count int
+	if e = db.QueryRow(`SELECT count(*) FROM search.inbox`).Scan(&count); e != nil || count != 1 {
+		t.Fatal(count, e)
+	}
+	rows, e := repo.Candidates(ctx, s.Filter{Query: "kept-course", Limit: 100})
+	if e != nil || len(rows) != 1 {
+		t.Fatal(rows, e)
+	}
+	school := doc("catalog", "school", "4111010006")
+	school.SchoolID = school.Target.ID
+	add(t, svc, f, school)
+	if _, e = svc.Search(ctx, "u", "10006", "school", "", 20); e != nil {
+		t.Fatal(e)
 	}
 }

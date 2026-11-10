@@ -39,3 +39,4 @@ scenario_tests:
 
   DS-SCHOOL-01:
     - school_search_test.go#TestSchoolSearchCodesNamesAliasesCurrentRightsAndRebuild
+    - school_search_test.go#TestSchoolProjectionMigrationPreservesExistingDocuments
