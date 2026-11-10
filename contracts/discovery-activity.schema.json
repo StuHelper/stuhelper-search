@@ -1,0 +1,350 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/StuHelper/stuhelper-search/contracts/discovery-activity.schema.json",
+  "title": "Discovery activity event",
+  "x-schema-version": "1.0.0",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "specversion": {
+          "const": "1.0"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "source": {
+          "const": "catalog"
+        },
+        "type": {
+          "const": "discovery.activity.v1"
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "time": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "const": "catalog"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "target": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "source": {
+                  "const": "catalog"
+                },
+                "kind": {
+                  "enum": [
+                    "course",
+                    "teacher"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              "required": [
+                "source",
+                "kind",
+                "id"
+              ]
+            },
+            "day": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "visible": {
+              "type": "boolean"
+            },
+            "metrics": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "views": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                }
+              },
+              "required": [
+                "views"
+              ]
+            }
+          },
+          "required": [
+            "source",
+            "id",
+            "target",
+            "day",
+            "revision",
+            "visible",
+            "metrics"
+          ]
+        }
+      },
+      "required": [
+        "specversion",
+        "id",
+        "source",
+        "type",
+        "subject",
+        "time",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "specversion": {
+          "const": "1.0"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "source": {
+          "const": "reviews"
+        },
+        "type": {
+          "const": "discovery.activity.v1"
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "time": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "const": "reviews"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "target": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "source": {
+                  "const": "catalog"
+                },
+                "kind": {
+                  "enum": [
+                    "course",
+                    "teacher"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              "required": [
+                "source",
+                "kind",
+                "id"
+              ]
+            },
+            "day": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "visible": {
+              "type": "boolean"
+            },
+            "metrics": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "reviews": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                "interactions": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                }
+              },
+              "required": [
+                "reviews",
+                "interactions"
+              ]
+            }
+          },
+          "required": [
+            "source",
+            "id",
+            "target",
+            "day",
+            "revision",
+            "visible",
+            "metrics"
+          ]
+        }
+      },
+      "required": [
+        "specversion",
+        "id",
+        "source",
+        "type",
+        "subject",
+        "time",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "specversion": {
+          "const": "1.0"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "source": {
+          "const": "favorites"
+        },
+        "type": {
+          "const": "discovery.activity.v1"
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "time": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "const": "favorites"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "target": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "source": {
+                  "const": "catalog"
+                },
+                "kind": {
+                  "enum": [
+                    "course",
+                    "teacher"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              "required": [
+                "source",
+                "kind",
+                "id"
+              ]
+            },
+            "day": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "visible": {
+              "type": "boolean"
+            },
+            "metrics": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "favorites": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                }
+              },
+              "required": [
+                "favorites"
+              ]
+            }
+          },
+          "required": [
+            "source",
+            "id",
+            "target",
+            "day",
+            "revision",
+            "visible",
+            "metrics"
+          ]
+        }
+      },
+      "required": [
+        "specversion",
+        "id",
+        "source",
+        "type",
+        "subject",
+        "time",
+        "data"
+      ]
+    }
+  ]
+}

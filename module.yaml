@@ -1,0 +1,42 @@
+id: search
+version: 0.3.0
+kind: module
+api: 1
+critical: false
+requires:
+  - id: platform
+    api: 1
+optional:
+  - id: catalog
+    api: 1
+  - id: reviews
+    api: 1
+  - id: resources
+    api: 1
+  - id: favorites
+    api: 1
+  - id: community
+    api: 1
+capabilities:
+  - search.query
+  - search.projection
+scenario_tests:
+  DS-01:
+    - integration_test.go#TestVisibilityPaginationAndHotTargets
+  DS-04:
+    - integration_test.go#TestMyVotesHTTPAndTimeout
+  DS-05:
+    - activity_test.go#TestHeatWeightsWindowAndTeachers
+    - activity_test.go#TestActivityOwnership
+  DS-06:
+    - integration_test.go#TestProjectionFailureRollback
+    - activity_test.go#TestActivityReplayAndRebuild
+  DS-07:
+    - integration_test.go#TestContentDocumentKinds
+    - integration_test.go#TestProjectionReplayRebuildAndIsolation
+    - activity_test.go#TestActivityReplayAndRebuild
+    - activity_test.go#TestActivitySnapshotPagination
+
+  DS-SCHOOL-01:
+    - school_search_test.go#TestSchoolSearchCodesNamesAliasesCurrentRightsAndRebuild
+    - school_search_test.go#TestSchoolProjectionMigrationPreservesExistingDocuments
