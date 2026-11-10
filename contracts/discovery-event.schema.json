@@ -1,0 +1,140 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "specversion": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "source": {
+      "enum": [
+        "catalog",
+        "reviews",
+        "resources"
+      ]
+    },
+    "type": {
+      "enum": [
+        "catalog.discovery.v1",
+        "reviews.discovery.v1",
+        "resources.discovery.v1"
+      ]
+    },
+    "subject": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "enum": [
+                "catalog",
+                "reviews",
+                "resources"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "kind": {
+              "enum": [
+                "school",
+                "course",
+                "teacher",
+                "review",
+                "resource"
+              ]
+            }
+          },
+          "required": [
+            "source",
+            "id",
+            "kind"
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "school_id": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "course_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "teacher_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "maxItems": 100,
+          "uniqueItems": true
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "code": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "aliases": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "maxLength": 256
+          }
+        }
+      },
+      "required": [
+        "target",
+        "revision",
+        "title",
+        "school_id",
+        "visible",
+        "at"
+      ]
+    }
+  },
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "subject",
+    "time",
+    "data"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StuHelper discovery projection event"
+}
