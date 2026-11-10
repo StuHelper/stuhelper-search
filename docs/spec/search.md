@@ -1,14 +1,14 @@
 ---
 type: spec
 status: Accepted
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # 搜索与热门发现模块
 
 ## 当前行为
 
-OpenAPI 版本为 0.2.0，提供 `/api/v1/search`、`/api/v1/search/popular` 和 `/api/v1/search/my-votes` 三个 GET 接口。Go SDK 与 TypeScript 类型由接口定义生成。
+OpenAPI 版本为 0.3.0，提供 `/api/v1/search`、`/api/v1/search/popular` 和 `/api/v1/search/my-votes` 三个 GET 接口。Go SDK 与 TypeScript 类型由接口定义生成。
 
 search 通过来源公开事件构建可重建投影，索引只保存公开标题、来源 ID、修订号、学校、归属关系、活动计数及可见状态。search 不读取其他模块业务表，不保存评价正文、作者身份或五维评分数据。
 
@@ -56,7 +56,7 @@ CurrentActivity 按请求人检查来源活动当前可见性与修订，Current
 
 重建持有投影写锁，relay 可重试超时消费；来源快照事务应独立于 relay 确认，避免互相等待。内容与活动投影在同一事务发布，任一已启用来源失败时全部回滚。缺失活动保留不可见墓碑，阻止旧修订重新计数。
 
-search.documents 只保存 catalog 的 course、teacher，reviews 的 review，以及 resources 的 resource。服务层与数据库均校验类型和来源，缺失或非法类型拒绝写入。热门活动由独立事件写入 search.activities。
+search.documents 只保存 catalog 的 school、course、teacher，reviews 的 review，以及 resources 的 resource。服务层与数据库均校验类型和来源，缺失或非法类型拒绝写入。热门活动由独立事件写入 search.activities。
 
 重建与查询使用 PostgreSQL 事务隔离，查询保留旧的已提交投影，只有完整重建才发布新投影。失败整体回滚，低于已消费修订的快照拒绝。缺失对象保留不可见墓碑，延迟到达的旧事件无法复活内容。
 
@@ -68,7 +68,7 @@ search.documents 只保存 catalog 的 course、teacher，reviews 的 review，�
 
 | 来源 | 需要提供的事件 | 必需事实 |
 | --- | --- | --- |
-| catalog | catalog.discovery.v1 | 每个课程或教师的规范 ID、学校、公开标题、修订和可见状态；导入、合并、修改及删除均逐对象发出 |
+| catalog | catalog.discovery.v1 | 每个学校、课程或教师的规范 ID、学校、公开标题、修订和可见状态；导入、合并、修改及删除均逐对象发出 |
 | reviews | reviews.discovery.v1 | 有效课程评价的公开检索标题、规范课程 ID、教师归属、事件时间及可见状态；修订、撤回、到期和删除均发出 |
 | resources | resources.discovery.v1 | 资料公开标题、学校、课程关联、修订及当前可见状态；更新、下架及删除均发出 |
 | catalog、reviews、favorites | discovery.activity.v1 | 各来源拥有的日指标快照，字段和来源必须符合活动 Schema |
@@ -119,3 +119,17 @@ scenario_tests 登记 DS-01、DS-04 至 DS-07。集成测试使用隔离 Postgre
 | DS-07：重复乱序与重建 | 重复事件去重，旧修订不覆盖新状态，重建失败回滚，运行身份越权被拒绝，内容类型受数据库约束 | TestContentDocumentKinds、TestProjectionReplayRebuildAndIsolation、TestActivityReplayAndRebuild、TestActivitySnapshotPagination |
 
 2026-11-09 在隔离 PostgreSQL 18.6 上执行完整 make check，通过 SDK 一致性、仓库边界、文档、gofmt、vet、race 测试、构建及工作流检查。真实账号、跨模块 relay、来源接口适配器与生产部署均未验收。
+
+## 学校检索
+
+GET /api/v1/search 的 kind 增加 school。学校文档由 catalog 的 discovery 事件或重建快照提供，包含规范 ID、学校、名称、可选 code 和登记 aliases。课程、教师、评价和资料的检索与热门计数规则保持不变。
+
+q 去除首尾空白。纯数字精确匹配学校 ID 或 code，五位数字也匹配十位数字 ID/code 的后五位。4111010006 与 10006 可匹配同一学校，不把其他数字片段作为模糊代码。不存在的代码返回空列表。
+
+名称与登记别名按不区分大小写的字面子串匹配，支持“北京航空航天大学”“北航”和 Beihang。百分号、下划线和反斜线不作为通配符。学校字段不复制到其他类型以扩大匹配范围。
+
+返回前继续通过来源公开端口检查当前权限、可见性和修订。来源故障返回 unavailable，旧别名投影不绕过修订检查。完整重建发布新快照；学校停用后立即不可见，旧事件不能恢复旧修订。
+
+迁移在事务中扩大 documents_content_kind 约束以接纳学校，保留已有投影与 inbox。升级后执行提供方支持的重建，确保学校与别名完整进入索引。学校不参与热门活动计数。
+
+DS-SCHOOL-01 覆盖完整码、五位码、名称、别名、无结果、字面匹配、分页、当前撤权与别名修订重建。

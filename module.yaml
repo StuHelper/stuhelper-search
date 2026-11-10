@@ -1,5 +1,5 @@
 id: search
-version: 0.2.0
+version: 0.3.0
 kind: module
 api: 1
 critical: false
@@ -36,3 +36,6 @@ scenario_tests:
     - integration_test.go#TestProjectionReplayRebuildAndIsolation
     - activity_test.go#TestActivityReplayAndRebuild
     - activity_test.go#TestActivitySnapshotPagination
+
+  DS-SCHOOL-01:
+    - school_search_test.go#TestSchoolSearchCodesNamesAliasesCurrentRightsAndRebuild

@@ -41,9 +41,22 @@ func New(repo Repository, sources Sources, c Config) (*Service, error) {
 	return &Service{repo, sources, c}, nil
 }
 func validTarget(t Target) bool {
-	return len(t.ID) > 0 && len(t.ID) <= 200 && !strings.ContainsRune(t.ID, 0) && ((t.Source == "catalog" && (t.Kind == "course" || t.Kind == "teacher")) || (t.Source == "reviews" && t.Kind == "review") || (t.Source == "resources" && t.Kind == "resource"))
+	return len(t.ID) > 0 && len(t.ID) <= 200 && !strings.ContainsRune(t.ID, 0) && ((t.Source == "catalog" && (t.Kind == "school" || t.Kind == "course" || t.Kind == "teacher")) || (t.Source == "reviews" && t.Kind == "review") || (t.Source == "resources" && t.Kind == "resource"))
 }
 func Validate(d Document) error {
+	if d.Target.Kind == "school" {
+		if d.Target.ID != d.SchoolID || !utf8.ValidString(d.Code) || utf8.RuneCountInString(d.Code) > 128 || strings.ContainsRune(d.Code, 0) || len(d.Aliases) > 50 {
+			return ErrInput
+		}
+		for _, alias := range d.Aliases {
+			if !utf8.ValidString(alias) || utf8.RuneCountInString(alias) > 256 || strings.ContainsRune(alias, 0) {
+				return ErrInput
+			}
+		}
+	} else if d.Code != "" || len(d.Aliases) > 0 {
+		return ErrInput
+	}
+
 	if !validTarget(d.Target) || d.Revision < 1 || len(d.Title) > 1000 || !utf8.ValidString(d.Title) || len(d.SchoolID) > 200 || len(d.TeacherIDs) > 100 || d.At.IsZero() {
 		return ErrInput
 	}
@@ -151,11 +164,12 @@ func auth(user string) error {
 	return nil
 }
 func (s *Service) Search(ctx context.Context, user, q, kind, cursor string, limit int) (Page, error) {
+	q = strings.TrimSpace(q)
 	out := Page{Items: []Item{}}
 	if e := auth(user); e != nil {
 		return out, e
 	}
-	if utf8.RuneCountInString(q) > 200 || limit < 1 || limit > 100 || kind != "" && kind != "course" && kind != "teacher" && kind != "review" && kind != "resource" {
+	if utf8.RuneCountInString(q) > 200 || limit < 1 || limit > 100 || kind != "" && kind != "school" && kind != "course" && kind != "teacher" && kind != "review" && kind != "resource" {
 		return out, ErrInput
 	}
 	after, e := decode(cursor)

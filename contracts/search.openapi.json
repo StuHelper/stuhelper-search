@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "StuHelper Search",
-    "version": "0.2.0"
+    "version": "0.3.0"
   },
   "paths": {
     "/api/v1/search": {
@@ -14,7 +14,7 @@
             "name": "q",
             "in": "query",
             "required": false,
-            "description": "q",
+            "description": "Trim surrounding whitespace. School numeric id/code queries match exactly; five digits also match the suffix of a ten-digit id/code. Names and registered aliases use case-insensitive literal substring matching.",
             "schema": {
               "type": "string",
               "maxLength": 200
@@ -28,6 +28,7 @@
             "schema": {
               "type": "string",
               "enum": [
+                "school",
                 "course",
                 "teacher",
                 "review",
@@ -352,6 +353,7 @@
           "kind": {
             "type": "string",
             "enum": [
+              "school",
               "course",
               "teacher",
               "review",

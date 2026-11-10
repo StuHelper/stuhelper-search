@@ -64,7 +64,7 @@ export interface components {
             source: "catalog" | "reviews" | "resources";
             id: string;
             /** @enum {string} */
-            kind: "course" | "teacher" | "review" | "resource";
+            kind: "school" | "course" | "teacher" | "review" | "resource";
         };
         Item: {
             target: components["schemas"]["Target"];
@@ -99,10 +99,10 @@ export interface operations {
     search: {
         parameters: {
             query?: {
-                /** @description q */
+                /** @description Trim surrounding whitespace. School numeric id/code queries match exactly; five digits also match the suffix of a ten-digit id/code. Names and registered aliases use case-insensitive literal substring matching. */
                 q?: string;
                 /** @description kind */
-                kind?: "course" | "teacher" | "review" | "resource";
+                kind?: "school" | "course" | "teacher" | "review" | "resource";
                 /** @description cursor */
                 cursor?: string;
                 /** @description limit */

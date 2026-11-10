@@ -20,6 +20,7 @@ const (
 	TargetKindCourse   TargetKind = "course"
 	TargetKindResource TargetKind = "resource"
 	TargetKindReview   TargetKind = "review"
+	TargetKindSchool   TargetKind = "school"
 	TargetKindTeacher  TargetKind = "teacher"
 )
 
@@ -31,6 +32,8 @@ func (e TargetKind) Valid() bool {
 	case TargetKindResource:
 		return true
 	case TargetKindReview:
+		return true
+	case TargetKindSchool:
 		return true
 	case TargetKindTeacher:
 		return true
@@ -83,6 +86,7 @@ const (
 	SearchParamsKindCourse   SearchParamsKind = "course"
 	SearchParamsKindResource SearchParamsKind = "resource"
 	SearchParamsKindReview   SearchParamsKind = "review"
+	SearchParamsKindSchool   SearchParamsKind = "school"
 	SearchParamsKindTeacher  SearchParamsKind = "teacher"
 )
 
@@ -94,6 +98,8 @@ func (e SearchParamsKind) Valid() bool {
 	case SearchParamsKindResource:
 		return true
 	case SearchParamsKindReview:
+		return true
+	case SearchParamsKindSchool:
 		return true
 	case SearchParamsKindTeacher:
 		return true
@@ -168,7 +174,7 @@ type Votes struct {
 
 // SearchParams defines parameters for Search.
 type SearchParams struct {
-	// Q q
+	// Q Trim surrounding whitespace. School numeric id/code queries match exactly; five digits also match the suffix of a ten-digit id/code. Names and registered aliases use case-insensitive literal substring matching.
 	Q *string `form:"q,omitempty" json:"q,omitempty"`
 
 	// Kind kind

@@ -89,7 +89,11 @@ func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, 
 	}
 	// Parameterized substring search gives literal semantics for %, _ and backslashes.
 	rows, e := r.DB.QueryContext(ctx, `SELECT data FROM search.documents WHERE (data->>'visible')::boolean
- AND source||'/'||id > $1 AND ($2='' OR position(lower($2) in lower(data->>'title'))>0)
+ AND source||'/'||id > $1 AND ($2='' OR CASE WHEN data->'target'->>'kind'='school' AND $2 ~ '^[0-9]+$' THEN
+ id=$2 OR data->>'code'=$2
+ OR (length($2)=5 AND ((id ~ '^[0-9]{10}$' AND right(id,5)=$2) OR (data->>'code' ~ '^[0-9]{10}$' AND right(data->>'code',5)=$2)))
+ ELSE position(lower($2) in lower(data->>'title'))>0
+ OR (data->'target'->>'kind'='school' AND (position(lower($2) in lower(data->>'code'))>0 OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(COALESCE(data->'aliases','[]'::jsonb)) alias WHERE position(lower($2) in lower(alias))>0))) END)
  AND ($3='' OR data->'target'->>'kind'=$3)
  ORDER BY source||'/'||id LIMIT $4`, f.After, f.Query, f.Kind, f.Limit)
 	if e != nil {

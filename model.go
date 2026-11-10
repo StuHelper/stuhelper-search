@@ -28,6 +28,8 @@ type Item struct {
 
 // Document is a source-owned public projection snapshot, never review body or identity data.
 type Document struct {
+	Code       string    `json:"code,omitempty"`
+	Aliases    []string  `json:"aliases,omitempty"`
 	Target     Target    `json:"target"`
 	Revision   int64     `json:"revision"`
 	Title      string    `json:"title"`
