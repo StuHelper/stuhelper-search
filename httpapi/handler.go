@@ -77,9 +77,15 @@ func fail(w http.ResponseWriter, e error) {
 	case errors.Is(e, s.ErrNotFound):
 		code = 404
 		name = "not_found"
+	case errors.Is(e, s.ErrIndexBuilding):
+		code = 503
+		name = "index_building"
+		w.Header().Set("Retry-After", "10")
 	case errors.Is(e, context.DeadlineExceeded), errors.Is(e, context.Canceled):
 		code = 504
 		name = "timeout"
+	default:
+		w.Header().Set("Retry-After", "5")
 	}
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(map[string]string{"code": name})

@@ -13,7 +13,7 @@ export interface paths {
         };
         /**
          * 按当前权限过滤的全站搜索
-         * @description 课程同时按名称、课程号、曾用课程号、英文名和曾用名检索；每个结果返回当前规范课程 ID。
+         * @description 去除查询词首尾空白。学校纯数字查询精确匹配 ID 或代码，五位数字同时匹配十位 ID 或代码的后五位；名称与已登记别名按不区分大小写的字面子串匹配。课程同时按名称、课程号、曾用课程号、英文名和曾用名检索，返回当前规范课程 ID。仅当 next_cursor 为空字符串时表示分页结束。
          */
         get: operations["search"];
         put?: never;
@@ -31,7 +31,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 配置窗口内活动加权排行，同分按来源和 ID 排序 */
+        /**
+         * 配置窗口内活动加权排行，同分按来源和 ID 排序
+         * @description 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。
+         */
         get: operations["popular"];
         put?: never;
         post?: never;
@@ -48,7 +51,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 请求人当前有效投票，通过 reviews 公开接口读取 */
+        /**
+         * 请求人当前有效投票，通过 reviews 公开接口读取
+         * @description 读取请求人在 reviews 中的有效投票并逐条复核当前评价可见性。过滤不可见评价后单页 items 可能少于 limit，仅当 next_cursor 为空字符串时表示分页结束。
+         */
         get: operations["myVotes"];
         put?: never;
         post?: never;
@@ -62,16 +68,27 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description 跨模块公开目标引用。 */
         Target: {
-            /** @enum {string} */
+            /**
+             * @description 拥有目标事实的业务模块。
+             * @enum {string}
+             */
             source: "catalog" | "reviews" | "resources";
+            /** @description 目标在所属模块中的规范公开 ID。 */
             id: string;
-            /** @enum {string} */
+            /**
+             * @description 目标业务对象类型。
+             * @enum {string}
+             */
             kind: "school" | "course" | "teacher" | "review" | "resource";
         };
+        /** @description 经当前权限复核后的公开搜索或热门结果条目。 */
         Item: {
             target: components["schemas"]["Target"];
+            /** @description 目标公开标题或名称。 */
             title: string;
+            /** @description 目标所属学校 ID。 */
             school_id: string;
             /** @description 课程英文名。独立于 aliases；缺失时省略。 */
             english_name?: string;
@@ -82,21 +99,38 @@ export interface components {
             /** @description 课程当前课程号或学校代码。 */
             code?: string;
         };
+        /** @description 搜索或热门排行分页响应。 */
         Page: {
+            /** @description 本页通过权限复核的可见条目列表；过滤隐藏记录后长度可能小于 limit。 */
             items: components["schemas"]["Item"][];
+            /** @description 下一页游标；仅当为空字符串时表示已到达末尾，非空时即使 items 为空仍可能存在后续页。 */
             next_cursor: string;
+            /** @description 热门排行统计覆盖的配置时间窗口天数；仅热门接口返回，搜索接口省略。 */
+            window_days?: number;
         };
+        /** @description 请求人对单条课程评价的当前有效投票。 */
         Vote: {
             target: components["schemas"]["Target"];
-            /** @enum {string} */
+            /**
+             * @description 投票态度：up 为赞同，down 为反对。
+             * @enum {string}
+             */
             choice: "up" | "down";
         };
+        /** @description 我的投票分页响应。 */
         Votes: {
+            /** @description 本页可见的有效投票列表。 */
             items: components["schemas"]["Vote"][];
+            /** @description 下一页游标；仅当为空字符串时表示分页结束。 */
             next_cursor: string;
         };
+        /** @description 稳定错误响应体，供客户端映射多语言文案与无障碍状态提示。 */
         Error: {
-            code: string;
+            /**
+             * @description 稳定错误码：invalid_input 参数非法，unauthenticated 未登录，not_found 路径不存在，index_building 索引初始化构建中，unavailable 服务或依赖暂不可用，timeout 查询超时。
+             * @enum {string}
+             */
+            code: "invalid_input" | "unauthenticated" | "not_found" | "index_building" | "unavailable" | "timeout";
         };
     };
     responses: never;
@@ -110,13 +144,13 @@ export interface operations {
     search: {
         parameters: {
             query?: {
-                /** @description Trim surrounding whitespace. School numeric id/code queries match exactly; five digits also match the suffix of a ten-digit id/code. Names and registered aliases use case-insensitive literal substring matching. */
+                /** @description 检索关键词，去除首尾空白后最长 200 个字符；省略或为空时按默认顺序浏览可见条目。 */
                 q?: string;
-                /** @description kind */
+                /** @description 限定检索的目标类型；省略时检索全部可见类型。 */
                 kind?: "school" | "course" | "teacher" | "review" | "resource";
-                /** @description cursor */
+                /** @description 上一页响应返回的 next_cursor 续页游标；首次请求省略或传空字符串。 */
                 cursor?: string;
-                /** @description limit */
+                /** @description 单页最多返回的可见条目数，默认 20，范围 1–100。 */
                 limit?: number;
             };
             header?: never;
@@ -125,7 +159,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 按当前权限过滤的全站搜索 */
+            /** @description 当前请求人可见的搜索结果分页。 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -134,7 +168,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page"];
                 };
             };
-            /** @description invalid_input */
+            /** @description 请求参数、游标或分页上限不合法（invalid_input）。 */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -143,7 +177,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description unauthenticated */
+            /** @description 请求未携带有效登录身份（unauthenticated）。 */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -152,7 +186,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description not_found */
+            /** @description 请求路径不存在（not_found）。 */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -161,16 +195,18 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description unavailable */
+            /** @description 搜索索引正在初始化（index_building）或上游依赖暂不可用（unavailable）。 */
             503: {
                 headers: {
+                    /** @description 建议客户端自动重试前等待的秒数。 */
+                    "Retry-After"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description timeout */
+            /** @description 查询或回源复核超时（timeout）。 */
             504: {
                 headers: {
                     [name: string]: unknown;
@@ -184,11 +220,11 @@ export interface operations {
     popular: {
         parameters: {
             query: {
-                /** @description kind */
+                /** @description 热门榜单目标类型（课程或教师）。 */
                 kind: "course" | "teacher";
-                /** @description cursor */
+                /** @description 上一页响应返回的 next_cursor 续页游标；首次请求省略或传空字符串。 */
                 cursor?: string;
-                /** @description limit */
+                /** @description 单页最多返回的可见条目数，默认 20，范围 1–100。 */
                 limit?: number;
             };
             header?: never;
@@ -197,7 +233,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 配置窗口内活动加权排行，同分按来源和 ID 排序 */
+            /** @description 配置时间窗口内的热门目标分页及窗口天数。 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -206,7 +242,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page"];
                 };
             };
-            /** @description invalid_input */
+            /** @description 榜单类型、游标或分页上限不合法（invalid_input）。 */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -215,7 +251,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description unauthenticated */
+            /** @description 请求未携带有效登录身份（unauthenticated）。 */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -224,7 +260,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description not_found */
+            /** @description 请求路径不存在（not_found）。 */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -233,16 +269,18 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description unavailable */
+            /** @description 搜索索引正在初始化（index_building）或活动来源暂不可用（unavailable）。 */
             503: {
                 headers: {
+                    /** @description 建议客户端自动重试前等待的秒数。 */
+                    "Retry-After"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description timeout */
+            /** @description 热门汇总或回源复核超时（timeout）。 */
             504: {
                 headers: {
                     [name: string]: unknown;
@@ -256,9 +294,9 @@ export interface operations {
     myVotes: {
         parameters: {
             query?: {
-                /** @description cursor */
+                /** @description 上一页响应返回的 next_cursor 续页游标；首次请求省略或传空字符串。 */
                 cursor?: string;
-                /** @description limit */
+                /** @description 单页最多返回的有效投票条数，默认 20，范围 1–100。 */
                 limit?: number;
             };
             header?: never;
@@ -267,7 +305,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 请求人当前有效投票，通过 reviews 公开接口读取 */
+            /** @description 请求人当前可见的有效投票分页。 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -276,7 +314,7 @@ export interface operations {
                     "application/json": components["schemas"]["Votes"];
                 };
             };
-            /** @description invalid_input */
+            /** @description 游标或分页上限不合法（invalid_input）。 */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -285,7 +323,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description unauthenticated */
+            /** @description 请求未携带有效登录身份（unauthenticated）。 */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -294,7 +332,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description not_found */
+            /** @description 请求路径不存在（not_found）。 */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -303,16 +341,18 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description unavailable */
+            /** @description 评价来源暂不可用（unavailable）。 */
             503: {
                 headers: {
+                    /** @description 建议客户端自动重试前等待的秒数。 */
+                    "Retry-After"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description timeout */
+            /** @description 投票查询或权限复核超时（timeout）。 */
             504: {
                 headers: {
                     [name: string]: unknown;

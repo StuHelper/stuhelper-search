@@ -246,7 +246,11 @@ func (s *Service) MyVotes(ctx context.Context, user, cursor string, limit int) (
 	return out, nil
 }
 func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit int) (Page, error) {
-	out := Page{Items: []Item{}}
+	windowDays := int(math.Ceil(s.config.HeatWindow.Hours() / 24))
+	if windowDays < 1 {
+		windowDays = 1
+	}
+	out := Page{Items: []Item{}, WindowDays: windowDays}
 	if e := auth(user); e != nil {
 		return out, e
 	}

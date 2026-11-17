@@ -15,6 +15,36 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for ErrorCode.
+const (
+	IndexBuilding   ErrorCode = "index_building"
+	InvalidInput    ErrorCode = "invalid_input"
+	NotFound        ErrorCode = "not_found"
+	Timeout         ErrorCode = "timeout"
+	Unauthenticated ErrorCode = "unauthenticated"
+	Unavailable     ErrorCode = "unavailable"
+)
+
+// Valid indicates whether the value is a known member of the ErrorCode enum.
+func (e ErrorCode) Valid() bool {
+	switch e {
+	case IndexBuilding:
+		return true
+	case InvalidInput:
+		return true
+	case NotFound:
+		return true
+	case Timeout:
+		return true
+	case Unauthenticated:
+		return true
+	case Unavailable:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TargetKind.
 const (
 	TargetKindCourse   TargetKind = "course"
@@ -126,12 +156,16 @@ func (e PopularParamsKind) Valid() bool {
 	}
 }
 
-// Error defines model for Error.
+// Error 稳定错误响应体，供客户端映射多语言文案与无障碍状态提示。
 type Error struct {
-	Code string `json:"code"`
+	// Code 稳定错误码：invalid_input 参数非法，unauthenticated 未登录，not_found 路径不存在，index_building 索引初始化构建中，unavailable 服务或依赖暂不可用，timeout 查询超时。
+	Code ErrorCode `json:"code"`
 }
 
-// Item defines model for Item.
+// ErrorCode 稳定错误码：invalid_input 参数非法，unauthenticated 未登录，not_found 路径不存在，index_building 索引初始化构建中，unavailable 服务或依赖暂不可用，timeout 查询超时。
+type ErrorCode string
+
+// Item 经当前权限复核后的公开搜索或热门结果条目。
 type Item struct {
 	// Code 课程当前课程号或学校代码。
 	Code *string `json:"code,omitempty"`
@@ -144,57 +178,80 @@ type Item struct {
 
 	// FormerNames 课程曾用名，可搜索并在详情显示；不包含英文名或曾用课程号。
 	FormerNames *[]string `json:"former_names,omitempty"`
-	SchoolId    string    `json:"school_id"`
-	Target      Target    `json:"target"`
-	Title       string    `json:"title"`
+
+	// SchoolId 目标所属学校 ID。
+	SchoolId string `json:"school_id"`
+
+	// Target 跨模块公开目标引用。
+	Target Target `json:"target"`
+
+	// Title 目标公开标题或名称。
+	Title string `json:"title"`
 }
 
-// Page defines model for Page.
+// Page 搜索或热门排行分页响应。
 type Page struct {
-	Items      []Item `json:"items"`
+	// Items 本页通过权限复核的可见条目列表；过滤隐藏记录后长度可能小于 limit。
+	Items []Item `json:"items"`
+
+	// NextCursor 下一页游标；仅当为空字符串时表示已到达末尾，非空时即使 items 为空仍可能存在后续页。
 	NextCursor string `json:"next_cursor"`
+
+	// WindowDays 热门排行统计覆盖的配置时间窗口天数；仅热门接口返回，搜索接口省略。
+	WindowDays *int `json:"window_days,omitempty"`
 }
 
-// Target defines model for Target.
+// Target 跨模块公开目标引用。
 type Target struct {
-	Id     string       `json:"id"`
-	Kind   TargetKind   `json:"kind"`
+	// Id 目标在所属模块中的规范公开 ID。
+	Id string `json:"id"`
+
+	// Kind 目标业务对象类型。
+	Kind TargetKind `json:"kind"`
+
+	// Source 拥有目标事实的业务模块。
 	Source TargetSource `json:"source"`
 }
 
-// TargetKind defines model for Target.Kind.
+// TargetKind 目标业务对象类型。
 type TargetKind string
 
-// TargetSource defines model for Target.Source.
+// TargetSource 拥有目标事实的业务模块。
 type TargetSource string
 
-// Vote defines model for Vote.
+// Vote 请求人对单条课程评价的当前有效投票。
 type Vote struct {
+	// Choice 投票态度：up 为赞同，down 为反对。
 	Choice VoteChoice `json:"choice"`
-	Target Target     `json:"target"`
+
+	// Target 跨模块公开目标引用。
+	Target Target `json:"target"`
 }
 
-// VoteChoice defines model for Vote.Choice.
+// VoteChoice 投票态度：up 为赞同，down 为反对。
 type VoteChoice string
 
-// Votes defines model for Votes.
+// Votes 我的投票分页响应。
 type Votes struct {
-	Items      []Vote `json:"items"`
+	// Items 本页可见的有效投票列表。
+	Items []Vote `json:"items"`
+
+	// NextCursor 下一页游标；仅当为空字符串时表示分页结束。
 	NextCursor string `json:"next_cursor"`
 }
 
 // SearchParams defines parameters for Search.
 type SearchParams struct {
-	// Q Trim surrounding whitespace. School numeric id/code queries match exactly; five digits also match the suffix of a ten-digit id/code. Names and registered aliases use case-insensitive literal substring matching.
+	// Q 检索关键词，去除首尾空白后最长 200 个字符；省略或为空时按默认顺序浏览可见条目。
 	Q *string `form:"q,omitempty" json:"q,omitempty"`
 
-	// Kind kind
+	// Kind 限定检索的目标类型；省略时检索全部可见类型。
 	Kind *SearchParamsKind `form:"kind,omitempty" json:"kind,omitempty"`
 
-	// Cursor cursor
+	// Cursor 上一页响应返回的 next_cursor 续页游标；首次请求省略或传空字符串。
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 
-	// Limit limit
+	// Limit 单页最多返回的可见条目数，默认 20，范围 1–100。
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
@@ -203,22 +260,22 @@ type SearchParamsKind string
 
 // MyVotesParams defines parameters for MyVotes.
 type MyVotesParams struct {
-	// Cursor cursor
+	// Cursor 上一页响应返回的 next_cursor 续页游标；首次请求省略或传空字符串。
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 
-	// Limit limit
+	// Limit 单页最多返回的有效投票条数，默认 20，范围 1–100。
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // PopularParams defines parameters for Popular.
 type PopularParams struct {
-	// Kind kind
+	// Kind 热门榜单目标类型（课程或教师）。
 	Kind PopularParamsKind `form:"kind" json:"kind"`
 
-	// Cursor cursor
+	// Cursor 上一页响应返回的 next_cursor 续页游标；首次请求省略或传空字符串。
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 
-	// Limit limit
+	// Limit 单页最多返回的可见条目数，默认 20，范围 1–100。
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
@@ -301,17 +358,21 @@ type ClientInterface interface {
 
 	// Search 按当前权限过滤的全站搜索
 	//
-	// 课程同时按名称、课程号、曾用课程号、英文名和曾用名检索；每个结果返回当前规范课程 ID。.
+	// 去除查询词首尾空白。学校纯数字查询精确匹配 ID 或代码，五位数字同时匹配十位 ID 或代码的后五位；名称与已登记别名按不区分大小写的字面子串匹配。课程同时按名称、课程号、曾用课程号、英文名和曾用名检索，返回当前规范课程 ID。仅当 next_cursor 为空字符串时表示分页结束。.
 	//
 	// Corresponds with GET /api/v1/search (the `Search` operationId).
 	Search(ctx context.Context, params *SearchParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// MyVotes 请求人当前有效投票，通过 reviews 公开接口读取
 	//
+	// 读取请求人在 reviews 中的有效投票并逐条复核当前评价可见性。过滤不可见评价后单页 items 可能少于 limit，仅当 next_cursor 为空字符串时表示分页结束。.
+	//
 	// Corresponds with GET /api/v1/search/my-votes (the `MyVotes` operationId).
 	MyVotes(ctx context.Context, params *MyVotesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// Popular 配置窗口内活动加权排行，同分按来源和 ID 排序
+	//
+	// 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。.
 	//
 	// Corresponds with GET /api/v1/search/popular (the `Popular` operationId).
 	Popular(ctx context.Context, params *PopularParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -319,7 +380,7 @@ type ClientInterface interface {
 
 // Search 按当前权限过滤的全站搜索
 //
-// 课程同时按名称、课程号、曾用课程号、英文名和曾用名检索；每个结果返回当前规范课程 ID。.
+// 去除查询词首尾空白。学校纯数字查询精确匹配 ID 或代码，五位数字同时匹配十位 ID 或代码的后五位；名称与已登记别名按不区分大小写的字面子串匹配。课程同时按名称、课程号、曾用课程号、英文名和曾用名检索，返回当前规范课程 ID。仅当 next_cursor 为空字符串时表示分页结束。.
 //
 // Corresponds with GET /api/v1/search (the `Search` operationId).
 func (c *Client) Search(ctx context.Context, params *SearchParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -336,6 +397,8 @@ func (c *Client) Search(ctx context.Context, params *SearchParams, reqEditors ..
 
 // MyVotes 请求人当前有效投票，通过 reviews 公开接口读取
 //
+// 读取请求人在 reviews 中的有效投票并逐条复核当前评价可见性。过滤不可见评价后单页 items 可能少于 limit，仅当 next_cursor 为空字符串时表示分页结束。.
+//
 // Corresponds with GET /api/v1/search/my-votes (the `MyVotes` operationId).
 func (c *Client) MyVotes(ctx context.Context, params *MyVotesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewMyVotesRequest(c.Server, params)
@@ -350,6 +413,8 @@ func (c *Client) MyVotes(ctx context.Context, params *MyVotesParams, reqEditors 
 }
 
 // Popular 配置窗口内活动加权排行，同分按来源和 ID 排序
+//
+// 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。.
 //
 // Corresponds with GET /api/v1/search/popular (the `Popular` operationId).
 func (c *Client) Popular(ctx context.Context, params *PopularParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -640,7 +705,7 @@ type ClientWithResponsesInterface interface {
 
 	// SearchWithResponse 按当前权限过滤的全站搜索
 	//
-	// 课程同时按名称、课程号、曾用课程号、英文名和曾用名检索；每个结果返回当前规范课程 ID。.
+	// 去除查询词首尾空白。学校纯数字查询精确匹配 ID 或代码，五位数字同时匹配十位 ID 或代码的后五位；名称与已登记别名按不区分大小写的字面子串匹配。课程同时按名称、课程号、曾用课程号、英文名和曾用名检索，返回当前规范课程 ID。仅当 next_cursor 为空字符串时表示分页结束。.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -649,6 +714,8 @@ type ClientWithResponsesInterface interface {
 
 	// MyVotesWithResponse 请求人当前有效投票，通过 reviews 公开接口读取
 	//
+	// 读取请求人在 reviews 中的有效投票并逐条复核当前评价可见性。过滤不可见评价后单页 items 可能少于 limit，仅当 next_cursor 为空字符串时表示分页结束。.
+	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /api/v1/search/my-votes (the `MyVotes` operationId).
@@ -656,10 +723,17 @@ type ClientWithResponsesInterface interface {
 
 	// PopularWithResponse 配置窗口内活动加权排行，同分按来源和 ID 排序
 	//
+	// 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。.
+	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /api/v1/search/popular (the `Popular` operationId).
 	PopularWithResponse(ctx context.Context, params *PopularParams, reqEditors ...RequestEditorFn) (*PopularResponse, error)
+}
+
+// SearchResponse503Headers the declared response headers of an HTTP 503 response for Search
+type SearchResponse503Headers struct {
+	RetryAfter *string
 }
 
 type SearchResponse struct {
@@ -677,6 +751,8 @@ type SearchResponse struct {
 	JSON503 *Error
 	// JSON504 the response for an HTTP 504 `application/json` response
 	JSON504 *Error
+	// Headers503 the parsed response headers for an HTTP 503 response
+	Headers503 *SearchResponse503Headers
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
@@ -738,6 +814,11 @@ func (r SearchResponse) ContentType() string {
 	return ""
 }
 
+// MyVotesResponse503Headers the declared response headers of an HTTP 503 response for MyVotes
+type MyVotesResponse503Headers struct {
+	RetryAfter *string
+}
+
 type MyVotesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -753,6 +834,8 @@ type MyVotesResponse struct {
 	JSON503 *Error
 	// JSON504 the response for an HTTP 504 `application/json` response
 	JSON504 *Error
+	// Headers503 the parsed response headers for an HTTP 503 response
+	Headers503 *MyVotesResponse503Headers
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
@@ -814,6 +897,11 @@ func (r MyVotesResponse) ContentType() string {
 	return ""
 }
 
+// PopularResponse503Headers the declared response headers of an HTTP 503 response for Popular
+type PopularResponse503Headers struct {
+	RetryAfter *string
+}
+
 type PopularResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -829,6 +917,8 @@ type PopularResponse struct {
 	JSON503 *Error
 	// JSON504 the response for an HTTP 504 `application/json` response
 	JSON504 *Error
+	// Headers503 the parsed response headers for an HTTP 503 response
+	Headers503 *PopularResponse503Headers
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
@@ -892,7 +982,7 @@ func (r PopularResponse) ContentType() string {
 
 // SearchWithResponse 按当前权限过滤的全站搜索
 //
-// 课程同时按名称、课程号、曾用课程号、英文名和曾用名检索；每个结果返回当前规范课程 ID。.
+// 去除查询词首尾空白。学校纯数字查询精确匹配 ID 或代码，五位数字同时匹配十位 ID 或代码的后五位；名称与已登记别名按不区分大小写的字面子串匹配。课程同时按名称、课程号、曾用课程号、英文名和曾用名检索，返回当前规范课程 ID。仅当 next_cursor 为空字符串时表示分页结束。.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -907,6 +997,8 @@ func (c *ClientWithResponses) SearchWithResponse(ctx context.Context, params *Se
 
 // MyVotesWithResponse 请求人当前有效投票，通过 reviews 公开接口读取
 //
+// 读取请求人在 reviews 中的有效投票并逐条复核当前评价可见性。过滤不可见评价后单页 items 可能少于 limit，仅当 next_cursor 为空字符串时表示分页结束。.
+//
 // Returns a wrapper object for the known response body format(s).
 //
 // Corresponds with GET /api/v1/search/my-votes (the `MyVotes` operationId).
@@ -919,6 +1011,8 @@ func (c *ClientWithResponses) MyVotesWithResponse(ctx context.Context, params *M
 }
 
 // PopularWithResponse 配置窗口内活动加权排行，同分按来源和 ID 排序
+//
+// 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -989,6 +1083,19 @@ func ParseSearchResponse(rsp *http.Response) (*SearchResponse, error) {
 
 	}
 
+	switch {
+	case rsp.StatusCode == 503:
+		var headers SearchResponse503Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers503 = &headers
+	}
+
 	return response, nil
 }
 
@@ -1050,6 +1157,19 @@ func ParseMyVotesResponse(rsp *http.Response) (*MyVotesResponse, error) {
 
 	}
 
+	switch {
+	case rsp.StatusCode == 503:
+		var headers MyVotesResponse503Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers503 = &headers
+	}
+
 	return response, nil
 }
 
@@ -1109,6 +1229,19 @@ func ParsePopularResponse(rsp *http.Response) (*PopularResponse, error) {
 		}
 		response.JSON504 = &dest
 
+	}
+
+	switch {
+	case rsp.StatusCode == 503:
+		var headers PopularResponse503Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers503 = &headers
 	}
 
 	return response, nil

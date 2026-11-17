@@ -51,8 +51,11 @@ func (r *Repository) Activities(ctx context.Context, f s.ActivityFilter) ([]s.Ac
 		return nil, s.ErrInput
 	}
 	var ready bool
-	if e := r.DB.QueryRowContext(ctx, "SELECT ready FROM search.state WHERE id").Scan(&ready); e != nil || !ready {
-		return nil, s.ErrUnavailable
+	if e := r.DB.QueryRowContext(ctx, "SELECT ready FROM search.state WHERE id").Scan(&ready); e != nil {
+		return nil, safe(e)
+	}
+	if !ready {
+		return nil, s.ErrIndexBuilding
 	}
 	rows, e := r.DB.QueryContext(ctx, `SELECT data FROM search.activities WHERE kind=$1 AND day>=$2 AND day<$3 AND source||'/'||id>$4 AND (data->>'visible')::boolean ORDER BY source||'/'||id LIMIT $5`, f.Kind, f.From, f.To, f.After, f.Limit)
 	if e != nil {
