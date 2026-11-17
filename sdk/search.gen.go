@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/oapi-codegen/runtime"
 )
@@ -133,8 +134,14 @@ type Error struct {
 
 // Item defines model for Item.
 type Item struct {
+	// At 内容公开时间（UTC）。
+	At *time.Time `json:"at,omitempty"`
+
 	// Code 课程当前课程号或学校代码。
 	Code *string `json:"code,omitempty"`
+
+	// CourseId 评价或学习资料关联的规范课程 ID；无关联时省略。
+	CourseId *string `json:"course_id,omitempty"`
 
 	// EnglishName 课程英文名。独立于 aliases；缺失时省略。
 	EnglishName *string `json:"english_name,omitempty"`
@@ -146,7 +153,10 @@ type Item struct {
 	FormerNames *[]string `json:"former_names,omitempty"`
 	SchoolId    string    `json:"school_id"`
 	Target      Target    `json:"target"`
-	Title       string    `json:"title"`
+
+	// TeacherIds 关联的任课教师 ID 列表；无关联时省略。
+	TeacherIds *[]string `json:"teacher_ids,omitempty"`
+	Title      string    `json:"title"`
 }
 
 // Page defines model for Page.
@@ -171,7 +181,16 @@ type TargetSource string
 // Vote defines model for Vote.
 type Vote struct {
 	Choice VoteChoice `json:"choice"`
-	Target Target     `json:"target"`
+
+	// CourseId 评价所属规范课程 ID。
+	CourseId *string `json:"course_id,omitempty"`
+
+	// SchoolId 评价所属学校 ID。
+	SchoolId *string `json:"school_id,omitempty"`
+	Target   Target  `json:"target"`
+
+	// Title 评价公开检索标题。
+	Title *string `json:"title,omitempty"`
 }
 
 // VoteChoice defines model for Vote.Choice.
@@ -190,6 +209,15 @@ type SearchParams struct {
 
 	// Kind kind
 	Kind *SearchParamsKind `form:"kind,omitempty" json:"kind,omitempty"`
+
+	// SchoolId 按所属学校 ID 过滤结果。
+	SchoolId *string `form:"school_id,omitempty" json:"school_id,omitempty"`
+
+	// CourseId 按关联的规范课程 ID 过滤评价或学习资料。
+	CourseId *string `form:"course_id,omitempty" json:"course_id,omitempty"`
+
+	// TeacherId 按关联的任课教师 ID 过滤课程、评价或学习资料。
+	TeacherId *string `form:"teacher_id,omitempty" json:"teacher_id,omitempty"`
 
 	// Cursor cursor
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -214,6 +242,9 @@ type MyVotesParams struct {
 type PopularParams struct {
 	// Kind kind
 	Kind PopularParamsKind `form:"kind" json:"kind"`
+
+	// SchoolId 按所属学校 ID 过滤热门课程或教师。
+	SchoolId *string `form:"school_id,omitempty" json:"school_id,omitempty"`
 
 	// Cursor cursor
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -416,6 +447,42 @@ func NewSearchRequest(server string, params *SearchParams) (*http.Request, error
 
 		}
 
+		if params.SchoolId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "school_id", *params.SchoolId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.CourseId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "course_id", *params.CourseId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.TeacherId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "teacher_id", *params.TeacherId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
 		if params.Cursor != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
@@ -554,6 +621,18 @@ func NewPopularRequest(server string, params *PopularParams) (*http.Request, err
 			for _, qp := range strings.Split(queryFrag, "&") {
 				rawQueryFragments = append(rawQueryFragments, qp)
 			}
+		}
+
+		if params.SchoolId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "school_id", *params.SchoolId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
 		}
 
 		if params.Cursor != nil {

@@ -96,7 +96,10 @@ func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, 
  OR (data->'target'->>'kind' IN ('school','course') AND (position(lower($2) in lower(data->>'code'))>0 OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(COALESCE(NULLIF(data->'aliases','null'::jsonb),'[]'::jsonb)) alias WHERE position(lower($2) in lower(alias))>0)))
  OR (data->'target'->>'kind'='course' AND (position(lower($2) in lower(data->>'english_name'))>0 OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(COALESCE(NULLIF(data->'former_codes','null'::jsonb),'[]'::jsonb)||COALESCE(NULLIF(data->'former_names','null'::jsonb),'[]'::jsonb)) value WHERE position(lower($2) in lower(value))>0))) END)
  AND ($3='' OR data->'target'->>'kind'=$3)
- ORDER BY source||'/'||id LIMIT $4`, f.After, f.Query, f.Kind, f.Limit)
+ AND ($5='' OR data->>'school_id'=$5)
+ AND ($6='' OR data->>'course_id'=$6)
+ AND ($7='' OR jsonb_exists(COALESCE(NULLIF(data->'teacher_ids','null'::jsonb),'[]'::jsonb),$7))
+ ORDER BY source||'/'||id LIMIT $4`, f.After, f.Query, f.Kind, f.Limit, f.SchoolID, f.CourseID, f.TeacherID)
 	if e != nil {
 		return nil, safe(e)
 	}

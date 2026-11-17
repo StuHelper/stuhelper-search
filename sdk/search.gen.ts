@@ -81,6 +81,15 @@ export interface components {
             former_names?: string[];
             /** @description 课程当前课程号或学校代码。 */
             code?: string;
+            /** @description 评价或学习资料关联的规范课程 ID；无关联时省略。 */
+            course_id?: string;
+            /** @description 关联的任课教师 ID 列表；无关联时省略。 */
+            teacher_ids?: string[];
+            /**
+             * Format: date-time
+             * @description 内容公开时间（UTC）。
+             */
+            at?: string;
         };
         Page: {
             items: components["schemas"]["Item"][];
@@ -90,6 +99,12 @@ export interface components {
             target: components["schemas"]["Target"];
             /** @enum {string} */
             choice: "up" | "down";
+            /** @description 评价公开检索标题。 */
+            title?: string;
+            /** @description 评价所属规范课程 ID。 */
+            course_id?: string;
+            /** @description 评价所属学校 ID。 */
+            school_id?: string;
         };
         Votes: {
             items: components["schemas"]["Vote"][];
@@ -114,6 +129,12 @@ export interface operations {
                 q?: string;
                 /** @description kind */
                 kind?: "school" | "course" | "teacher" | "review" | "resource";
+                /** @description 按所属学校 ID 过滤结果。 */
+                school_id?: string;
+                /** @description 按关联的规范课程 ID 过滤评价或学习资料。 */
+                course_id?: string;
+                /** @description 按关联的任课教师 ID 过滤课程、评价或学习资料。 */
+                teacher_id?: string;
                 /** @description cursor */
                 cursor?: string;
                 /** @description limit */
@@ -186,6 +207,8 @@ export interface operations {
             query: {
                 /** @description kind */
                 kind: "course" | "teacher";
+                /** @description 按所属学校 ID 过滤热门课程或教师。 */
+                school_id?: string;
                 /** @description cursor */
                 cursor?: string;
                 /** @description limit */

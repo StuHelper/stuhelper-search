@@ -21,10 +21,13 @@ type Target struct {
 	Kind   string `json:"kind"`
 }
 type Item struct {
-	Code        string   `json:"code,omitempty"`
-	EnglishName string   `json:"english_name,omitempty"`
-	FormerCodes []string `json:"former_codes,omitempty"`
-	FormerNames []string `json:"former_names,omitempty"`
+	Code        string     `json:"code,omitempty"`
+	EnglishName string     `json:"english_name,omitempty"`
+	FormerCodes []string   `json:"former_codes,omitempty"`
+	FormerNames []string   `json:"former_names,omitempty"`
+	CourseID    string     `json:"course_id,omitempty"`
+	TeacherIDs  []string   `json:"teacher_ids,omitempty"`
+	At          *time.Time `json:"at,omitempty"`
 
 	Target   Target `json:"target"`
 	Title    string `json:"title"`
@@ -62,16 +65,34 @@ type Page struct {
 	NextCursor string `json:"next_cursor"`
 }
 type Vote struct {
-	Target Target `json:"target"`
-	Choice string `json:"choice"`
+	Target   Target `json:"target"`
+	Choice   string `json:"choice"`
+	Title    string `json:"title,omitempty"`
+	CourseID string `json:"course_id,omitempty"`
+	SchoolID string `json:"school_id,omitempty"`
 }
 type Votes struct {
 	Items      []Vote `json:"items"`
 	NextCursor string `json:"next_cursor"`
 }
+type SearchParams struct {
+	Query     string
+	Kind      string
+	SchoolID  string
+	CourseID  string
+	TeacherID string
+	Cursor    string
+	Limit     int
+}
+type PopularParams struct {
+	Kind     string
+	SchoolID string
+	Cursor   string
+	Limit    int
+}
 type Filter struct {
-	Query, Kind, After string
-	Limit              int
+	Query, Kind, SchoolID, CourseID, TeacherID, After string
+	Limit                                             int
 }
 type Repository interface {
 	Apply(context.Context, Event, string) error

@@ -169,15 +169,21 @@ func auth(user string) error {
 	return nil
 }
 func (s *Service) Search(ctx context.Context, user, q, kind, cursor string, limit int) (Page, error) {
-	q = strings.TrimSpace(q)
+	return s.SearchWithParams(ctx, user, SearchParams{Query: q, Kind: kind, Cursor: cursor, Limit: limit})
+}
+func (s *Service) SearchWithParams(ctx context.Context, user string, p SearchParams) (Page, error) {
+	q := strings.TrimSpace(p.Query)
 	out := Page{Items: []Item{}}
 	if e := auth(user); e != nil {
 		return out, e
 	}
-	if utf8.RuneCountInString(q) > 200 || limit < 1 || limit > 100 || kind != "" && kind != "school" && kind != "course" && kind != "teacher" && kind != "review" && kind != "resource" {
+	if !searchText(q, 200) || p.Limit < 1 || p.Limit > 100 || (p.Kind != "" && p.Kind != "school" && p.Kind != "course" && p.Kind != "teacher" && p.Kind != "review" && p.Kind != "resource") {
 		return out, ErrInput
 	}
-	after, e := decode(cursor)
+	if !validFilterID(p.SchoolID) || !validFilterID(p.CourseID) || !validFilterID(p.TeacherID) {
+		return out, ErrInput
+	}
+	after, e := decode(p.Cursor)
 	if e != nil {
 		return out, e
 	}
@@ -185,7 +191,15 @@ func (s *Service) Search(ctx context.Context, user, q, kind, cursor string, limi
 	defer cancel()
 	// The cursor tracks examined candidates, so invisible entries cannot stall pagination.
 	for scanned := 0; scanned < 10000; {
-		docs, e := s.repo.Candidates(ctx, Filter{Query: q, Kind: kind, After: after, Limit: 100})
+		docs, e := s.repo.Candidates(ctx, Filter{
+			Query:     q,
+			Kind:      p.Kind,
+			SchoolID:  p.SchoolID,
+			CourseID:  p.CourseID,
+			TeacherID: p.TeacherID,
+			After:     after,
+			Limit:     100,
+		})
 		if e != nil {
 			return out, e
 		}
@@ -196,10 +210,10 @@ func (s *Service) Search(ctx context.Context, user, q, kind, cursor string, limi
 			if e != nil {
 				return Page{}, e
 			}
-			if ok {
+			if ok && matchesSearchFilter(live, p) {
 				out.Items = append(out.Items, documentItem(live))
 			}
-			if len(out.Items) == limit {
+			if len(out.Items) == p.Limit {
 				out.NextCursor = encode(after)
 				return out, nil
 			}
@@ -220,40 +234,72 @@ func (s *Service) MyVotes(ctx context.Context, user, cursor string, limit int) (
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.config.QueryTimeout)
 	defer cancel()
-	v, e := s.sources.MyVotes(ctx, user, cursor, limit)
-	if e != nil {
-		return Votes{}, upstreamError(ctx)
+	const maxMyVotesScan = 500
+	out := Votes{Items: []Vote{}}
+	cur := cursor
+	seen := map[string]bool{}
+	if cur != "" {
+		seen[cur] = true
 	}
-	if len(v.Items) > limit || len(v.NextCursor) > 1024 {
-		return Votes{}, upstreamError(ctx)
-	}
-	out := Votes{Items: []Vote{}, NextCursor: v.NextCursor}
-	for _, vote := range v.Items {
-		if vote.Target.Source != "reviews" || !validTarget(vote.Target) || (vote.Choice != "up" && vote.Choice != "down") {
-			return Votes{}, upstreamError(ctx)
+	for scanned := 0; len(out.Items) < limit && scanned < maxMyVotesScan; {
+		need := limit - len(out.Items)
+		if rem := maxMyVotesScan - scanned; need > rem {
+			need = rem
 		}
-		d, ok, e := s.sources.Current(ctx, user, vote.Target)
+		v, e := s.sources.MyVotes(ctx, user, cur, need)
 		if e != nil {
 			return Votes{}, upstreamError(ctx)
 		}
-		if ok && (d.Target != vote.Target || Validate(d) != nil) {
+		if len(v.Items) > need || len(v.NextCursor) > 1024 {
+			return Votes{}, upstreamError(ctx)
+		}
+		if v.NextCursor != "" && (len(v.Items) == 0 || seen[v.NextCursor]) {
 			return Votes{}, ErrUnavailable
 		}
-		if ok && d.Visible {
-			out.Items = append(out.Items, vote)
+		for _, vote := range v.Items {
+			scanned++
+			if vote.Target.Source != "reviews" || vote.Target.Kind != "review" || !validTarget(vote.Target) || (vote.Choice != "up" && vote.Choice != "down") {
+				return Votes{}, upstreamError(ctx)
+			}
+			d, ok, e := s.sources.Current(ctx, user, vote.Target)
+			if e != nil {
+				return Votes{}, upstreamError(ctx)
+			}
+			if ok && (d.Target != vote.Target || Validate(d) != nil) {
+				return Votes{}, ErrUnavailable
+			}
+			if ok && d.Visible {
+				out.Items = append(out.Items, Vote{
+					Target:   vote.Target,
+					Choice:   vote.Choice,
+					Title:    d.Title,
+					CourseID: d.CourseID,
+					SchoolID: d.SchoolID,
+				})
+			}
 		}
+		cur = v.NextCursor
+		if cur == "" {
+			out.NextCursor = ""
+			break
+		}
+		seen[cur] = true
+		out.NextCursor = cur
 	}
 	return out, nil
 }
 func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit int) (Page, error) {
+	return s.PopularWithParams(ctx, user, PopularParams{Kind: kind, Cursor: cursor, Limit: limit})
+}
+func (s *Service) PopularWithParams(ctx context.Context, user string, p PopularParams) (Page, error) {
 	out := Page{Items: []Item{}}
 	if e := auth(user); e != nil {
 		return out, e
 	}
-	if limit < 1 || limit > 100 || (kind != "course" && kind != "teacher") {
+	if p.Limit < 1 || p.Limit > 100 || (p.Kind != "course" && p.Kind != "teacher") || !validFilterID(p.SchoolID) {
 		return out, ErrInput
 	}
-	after, e := decode(cursor)
+	after, e := decode(p.Cursor)
 	if e != nil {
 		return out, e
 	}
@@ -266,7 +312,7 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 	}
 	scores := map[Target]*ranked{}
 	from, to := s.activityWindow()
-	f := ActivityFilter{Kind: kind, From: from, To: to, Limit: 100}
+	f := ActivityFilter{Kind: p.Kind, From: from, To: to, Limit: 100}
 	for scanned := 0; ; {
 		docs, e := s.repo.Activities(ctx, f)
 		if e != nil {
@@ -323,7 +369,7 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 		if ok && (d.Target != t || Validate(d) != nil) {
 			return out, ErrUnavailable
 		}
-		if ok && d.Visible {
+		if ok && d.Visible && (p.SchoolID == "" || d.SchoolID == p.SchoolID) {
 			v.d = d
 			rows = append(rows, *v)
 		}
@@ -342,7 +388,7 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 			continue
 		}
 		out.Items = append(out.Items, documentItem(r.d))
-		if len(out.Items) == limit {
+		if len(out.Items) == p.Limit {
 			out.NextCursor = encode(token)
 			break
 		}
@@ -374,6 +420,49 @@ func searchNames(values []string, max int) bool {
 	}
 	return true
 }
+func validFilterID(v string) bool {
+	return v == "" || (searchText(v, 200) && strings.TrimSpace(v) == v && v != "")
+}
+func matchesSearchFilter(d Document, p SearchParams) bool {
+	if p.Kind != "" && d.Target.Kind != p.Kind {
+		return false
+	}
+	if p.SchoolID != "" && d.SchoolID != p.SchoolID {
+		return false
+	}
+	if p.CourseID != "" && d.CourseID != p.CourseID {
+		return false
+	}
+	if p.TeacherID != "" {
+		found := false
+		for _, id := range d.TeacherIDs {
+			if id == p.TeacherID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
 func documentItem(d Document) Item {
-	return Item{Target: d.Target, Title: d.Title, SchoolID: d.SchoolID, Code: d.Code, EnglishName: d.EnglishName, FormerCodes: append([]string{}, d.FormerCodes...), FormerNames: append([]string{}, d.FormerNames...)}
+	var at *time.Time
+	if !d.At.IsZero() {
+		utc := d.At.UTC()
+		at = &utc
+	}
+	return Item{
+		Target:      d.Target,
+		Title:       d.Title,
+		SchoolID:    d.SchoolID,
+		Code:        d.Code,
+		EnglishName: d.EnglishName,
+		FormerCodes: append([]string(nil), d.FormerCodes...),
+		FormerNames: append([]string(nil), d.FormerNames...),
+		CourseID:    d.CourseID,
+		TeacherIDs:  append([]string(nil), d.TeacherIDs...),
+		At:          at,
+	}
 }

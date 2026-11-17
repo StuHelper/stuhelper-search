@@ -37,6 +37,36 @@
             }
           },
           {
+            "name": "school_id",
+            "in": "query",
+            "required": false,
+            "description": "按所属学校 ID 过滤结果。",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "course_id",
+            "in": "query",
+            "required": false,
+            "description": "按关联的规范课程 ID 过滤评价或学习资料。",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "teacher_id",
+            "in": "query",
+            "required": false,
+            "description": "按关联的任课教师 ID 过滤课程、评价或学习资料。",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
             "name": "cursor",
             "in": "query",
             "required": false,
@@ -144,6 +174,16 @@
                 "course",
                 "teacher"
               ]
+            }
+          },
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": false,
+            "description": "按所属学校 ID 过滤热门课程或教师。",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
             }
           },
           {
@@ -412,6 +452,28 @@
             "type": "string",
             "maxLength": 128,
             "description": "课程当前课程号或学校代码。"
+          },
+          "course_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "评价或学习资料关联的规范课程 ID；无关联时省略。"
+          },
+          "teacher_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": "关联的任课教师 ID 列表；无关联时省略。"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "内容公开时间（UTC）。"
           }
         },
         "required": [
@@ -452,6 +514,22 @@
               "up",
               "down"
             ]
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "评价公开检索标题。"
+          },
+          "course_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "评价所属规范课程 ID。"
+          },
+          "school_id": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "评价所属学校 ID。"
           }
         },
         "required": [

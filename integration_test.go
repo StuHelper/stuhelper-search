@@ -55,7 +55,24 @@ func (f *source) DiscoverySnapshot(ctx context.Context, src, cursor string, limi
 	return out, "", nil
 }
 func (f *source) MyVotes(ctx context.Context, user, cursor string, limit int) (s.Votes, error) {
-	return s.Votes{Items: f.votes[user]}, nil
+	items := f.votes[user]
+	offset := 0
+	if cursor != "" {
+		if _, err := fmt.Sscanf(cursor, "%d", &offset); err != nil || offset < 0 || offset > len(items) {
+			return s.Votes{}, errors.New("invalid upstream cursor")
+		}
+	}
+	if offset >= len(items) {
+		return s.Votes{Items: []s.Vote{}}, nil
+	}
+	end := offset + limit
+	next := ""
+	if end < len(items) {
+		next = fmt.Sprintf("%d", end)
+	} else {
+		end = len(items)
+	}
+	return s.Votes{Items: append([]s.Vote(nil), items[offset:end]...), NextCursor: next}, nil
 }
 func doc(src, kind, id string) s.Document {
 	return s.Document{Target: s.Target{Source: src, ID: id, Kind: kind}, Revision: 1, Title: id, SchoolID: "school-a", Visible: true, At: now.Add(-time.Hour)}

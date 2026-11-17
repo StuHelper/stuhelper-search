@@ -48,9 +48,22 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var out any
 	switch r.URL.Path {
 	case "/api/v1/search":
-		out, e = h.Service.Search(r.Context(), user, q.Get("q"), q.Get("kind"), q.Get("cursor"), limit)
+		out, e = h.Service.SearchWithParams(r.Context(), user, s.SearchParams{
+			Query:     q.Get("q"),
+			Kind:      q.Get("kind"),
+			SchoolID:  q.Get("school_id"),
+			CourseID:  q.Get("course_id"),
+			TeacherID: q.Get("teacher_id"),
+			Cursor:    q.Get("cursor"),
+			Limit:     limit,
+		})
 	case "/api/v1/search/popular":
-		out, e = h.Service.Popular(r.Context(), user, q.Get("kind"), q.Get("cursor"), limit)
+		out, e = h.Service.PopularWithParams(r.Context(), user, s.PopularParams{
+			Kind:     q.Get("kind"),
+			SchoolID: q.Get("school_id"),
+			Cursor:   q.Get("cursor"),
+			Limit:    limit,
+		})
 	case "/api/v1/search/my-votes":
 		out, e = h.Service.MyVotes(r.Context(), user, q.Get("cursor"), limit)
 	default:
