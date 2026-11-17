@@ -11,7 +11,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 按当前权限过滤的全站搜索 */
+        /**
+         * 按当前权限过滤的全站搜索
+         * @description 课程同时按名称、课程号、曾用课程号、英文名和曾用名检索；每个结果返回当前规范课程 ID。
+         */
         get: operations["search"];
         put?: never;
         post?: never;
@@ -70,6 +73,14 @@ export interface components {
             target: components["schemas"]["Target"];
             title: string;
             school_id: string;
+            /** @description 课程英文名。独立于 aliases；缺失时省略。 */
+            english_name?: string;
+            /** @description 已确认属于同一课程的曾用课程号，可搜索。 */
+            former_codes?: string[];
+            /** @description 课程曾用名，可搜索并在详情显示；不包含英文名或曾用课程号。 */
+            former_names?: string[];
+            /** @description 课程当前课程号或学校代码。 */
+            code?: string;
         };
         Page: {
             items: components["schemas"]["Item"][];

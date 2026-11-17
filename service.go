@@ -44,16 +44,21 @@ func validTarget(t Target) bool {
 	return len(t.ID) > 0 && len(t.ID) <= 200 && !strings.ContainsRune(t.ID, 0) && ((t.Source == "catalog" && (t.Kind == "school" || t.Kind == "course" || t.Kind == "teacher")) || (t.Source == "reviews" && t.Kind == "review") || (t.Source == "resources" && t.Kind == "resource"))
 }
 func Validate(d Document) error {
-	if d.Target.Kind == "school" {
-		if d.Target.ID != d.SchoolID || !utf8.ValidString(d.Code) || utf8.RuneCountInString(d.Code) > 128 || strings.ContainsRune(d.Code, 0) || len(d.Aliases) > 50 {
+	if d.Target.Kind == "school" || d.Target.Kind == "course" {
+		if d.Target.Kind == "school" && d.Target.ID != d.SchoolID {
 			return ErrInput
 		}
-		for _, alias := range d.Aliases {
-			if !utf8.ValidString(alias) || utf8.RuneCountInString(alias) > 256 || strings.ContainsRune(alias, 0) {
-				return ErrInput
-			}
+		if !searchText(d.Code, 128) || !searchNames(d.Aliases, 256) {
+			return ErrInput
 		}
-	} else if d.Code != "" || len(d.Aliases) > 0 {
+	} else if d.Code != "" || len(d.Aliases) != 0 {
+		return ErrInput
+	}
+	if d.Target.Kind == "course" {
+		if !searchText(d.EnglishName, 256) || !searchNames(d.FormerCodes, 128) || !searchNames(d.FormerNames, 256) {
+			return ErrInput
+		}
+	} else if d.EnglishName != "" || len(d.FormerCodes) > 0 || len(d.FormerNames) > 0 {
 		return ErrInput
 	}
 
@@ -192,7 +197,7 @@ func (s *Service) Search(ctx context.Context, user, q, kind, cursor string, limi
 				return Page{}, e
 			}
 			if ok {
-				out.Items = append(out.Items, Item{live.Target, live.Title, live.SchoolID})
+				out.Items = append(out.Items, documentItem(live))
 			}
 			if len(out.Items) == limit {
 				out.NextCursor = encode(after)
@@ -336,7 +341,7 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 			passed = token == after
 			continue
 		}
-		out.Items = append(out.Items, Item{r.d.Target, r.d.Title, r.d.SchoolID})
+		out.Items = append(out.Items, documentItem(r.d))
 		if len(out.Items) == limit {
 			out.NextCursor = encode(token)
 			break
@@ -353,4 +358,22 @@ func upstreamError(ctx context.Context) error {
 		return err
 	}
 	return ErrUnavailable
+}
+
+func searchText(v string, max int) bool {
+	return utf8.ValidString(v) && utf8.RuneCountInString(v) <= max && !strings.ContainsRune(v, 0)
+}
+func searchNames(values []string, max int) bool {
+	if len(values) > 50 {
+		return false
+	}
+	for _, value := range values {
+		if !searchText(value, max) {
+			return false
+		}
+	}
+	return true
+}
+func documentItem(d Document) Item {
+	return Item{Target: d.Target, Title: d.Title, SchoolID: d.SchoolID, Code: d.Code, EnglishName: d.EnglishName, FormerCodes: append([]string{}, d.FormerCodes...), FormerNames: append([]string{}, d.FormerNames...)}
 }
