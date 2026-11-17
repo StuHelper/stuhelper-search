@@ -14,7 +14,7 @@ search 通过来源公开事件构建可重建投影，索引只保存公开标�
 
 HTTP 请求要求登录。Sources.Current 必须根据可信请求人、学校和操作查询来源当前权限及可见状态。修订不一致的候选暂不展示，来源故障返回 503。删除、下架和权限撤销无需等待投影事件即可影响查询。
 
-搜索使用字面子串匹配，按来源及 ID 排序。每页默认 20 条，上限 100。游标记录已检查候选位置，不暴露隐藏记录总量。一次最多检查 10000 条候选，搜索通过游标继续，热门排行超过上限返回暂不可用。
+搜索使用字面子串匹配，默认按来源及 ID 排序，并支持 `sort=recent` 按内容时间降序浏览最新公开课程、评价与资料。每页默认 20 条，上限 100。游标记录已检查候选位置并与排序模式绑定，一次最多检查 10000 条候选，热门排行超过上限返回暂不可用。
 
 查询超时由装配配置，必须大于零且不超过 30 秒，包含数据库和来源调用。来源适配器必须传递 context。重建总超时为两分钟，每批最多 100 条，每个来源最多 10000 批。
 
@@ -36,7 +36,9 @@ Service.Consume 接收 CloudEvents 1.0，source 为 catalog、reviews 或 resour
 
 活动使用独立事件 `discovery.activity.v1`。Schema 为 `contracts/discovery-activity.schema.json`，版本 1.0.0；相邻 `.sha256` 文件记录原始 UTF-8 文件的 SHA-256，完整检查验证摘要及字段归属。内容事件仅承载检索文档。
 
-活动快照保存在 search.activities，主键为 (source, id)，另以 (source, target.kind, target.id, day) 设置唯一约束。target.source 固定为 catalog，目标为一个规范课程或教师；课程活动不会自动复制到关联教师。
+活动快照保存在 search.activities，主键为 (source, id)，另以 (source, target.kind, target.id, day) 设置唯一约束。课程活动不会自动复制到关联教师。
+
+catalog 与 reviews 活动的目标为 catalog 的规范课程或教师；favorites 活动同时支持 resources 的学习资料，供 `Popular` 的 `kind=resource` 榜单汇总并经 `Sources.Current` 复核当前可见性。
 
 活动 ID 使用 `kind + "/" + base64url(UTF-8 对象 ID，无填充) + "/" + YYYY-MM-DD`，由 ActivityID 生成。事件 subject 等于活动 ID，封套 source 必须等于快照 source。不同来源可使用相同活动 ID，修订独立递增。
 

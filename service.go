@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -169,29 +170,49 @@ func auth(user string) error {
 	return nil
 }
 func (s *Service) Search(ctx context.Context, user, q, kind, cursor string, limit int) (Page, error) {
+	return s.SearchSort(ctx, user, q, kind, "relevance", cursor, limit)
+}
+
+func (s *Service) SearchSort(ctx context.Context, user, q, kind, sortMode, cursor string, limit int) (Page, error) {
 	q = strings.TrimSpace(q)
+	if sortMode == "" {
+		sortMode = "relevance"
+	}
 	out := Page{Items: []Item{}}
 	if e := auth(user); e != nil {
 		return out, e
 	}
-	if utf8.RuneCountInString(q) > 200 || limit < 1 || limit > 100 || kind != "" && kind != "school" && kind != "course" && kind != "teacher" && kind != "review" && kind != "resource" {
+	if !searchText(q, 200) || limit < 1 || limit > 100 || (sortMode != "relevance" && sortMode != "recent") || (kind != "" && kind != "school" && kind != "course" && kind != "teacher" && kind != "review" && kind != "resource") {
 		return out, ErrInput
 	}
 	after, e := decode(cursor)
 	if e != nil {
 		return out, e
 	}
+	if after != "" {
+		if sortMode == "recent" {
+			if _, _, _, _, err := ParseRecentAfter(after); err != nil {
+				return out, err
+			}
+		} else if strings.HasPrefix(after, "recent:") || !utf8.ValidString(after) || strings.ContainsRune(after, 0) {
+			return out, ErrInput
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, s.config.QueryTimeout)
 	defer cancel()
 	// The cursor tracks examined candidates, so invisible entries cannot stall pagination.
 	for scanned := 0; scanned < 10000; {
-		docs, e := s.repo.Candidates(ctx, Filter{Query: q, Kind: kind, After: after, Limit: 100})
+		docs, e := s.repo.Candidates(ctx, Filter{Query: q, Kind: kind, Sort: sortMode, After: after, Limit: 100})
 		if e != nil {
 			return out, e
 		}
 		for _, d := range docs {
 			scanned++
-			after = key(d)
+			if sortMode == "recent" {
+				after = RecentAfterToken(d)
+			} else {
+				after = key(d)
+			}
 			live, ok, e := s.current(ctx, user, d)
 			if e != nil {
 				return Page{}, e
@@ -250,7 +271,7 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 	if e := auth(user); e != nil {
 		return out, e
 	}
-	if limit < 1 || limit > 100 || (kind != "course" && kind != "teacher") {
+	if limit < 1 || limit > 100 || (kind != "course" && kind != "teacher" && kind != "resource") {
 		return out, ErrInput
 	}
 	after, e := decode(cursor)
@@ -376,4 +397,31 @@ func searchNames(values []string, max int) bool {
 }
 func documentItem(d Document) Item {
 	return Item{Target: d.Target, Title: d.Title, SchoolID: d.SchoolID, Code: d.Code, EnglishName: d.EnglishName, FormerCodes: append([]string{}, d.FormerCodes...), FormerNames: append([]string{}, d.FormerNames...)}
+}
+
+func RecentAfterToken(d Document) string {
+	return fmt.Sprintf("recent:%d:%s/%s", d.At.UTC().UnixMicro(), d.Target.Source, d.Target.ID)
+}
+
+func ParseRecentAfter(after string) (time.Time, string, string, bool, error) {
+	if after == "" {
+		return time.Time{}, "", "", false, nil
+	}
+	if !strings.HasPrefix(after, "recent:") || !utf8.ValidString(after) || strings.ContainsRune(after, 0) {
+		return time.Time{}, "", "", false, ErrInput
+	}
+	rest := strings.TrimPrefix(after, "recent:")
+	microPart, keyPart, ok := strings.Cut(rest, ":")
+	if !ok {
+		return time.Time{}, "", "", false, ErrInput
+	}
+	micros, err := strconv.ParseInt(microPart, 10, 64)
+	if err != nil {
+		return time.Time{}, "", "", false, ErrInput
+	}
+	src, id, ok := strings.Cut(keyPart, "/")
+	if !ok || (src != "catalog" && src != "reviews" && src != "resources") || !searchText(id, 200) || id == "" {
+		return time.Time{}, "", "", false, ErrInput
+	}
+	return time.UnixMicro(micros).UTC(), src, id, true, nil
 }

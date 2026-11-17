@@ -70,8 +70,8 @@ type Votes struct {
 	NextCursor string `json:"next_cursor"`
 }
 type Filter struct {
-	Query, Kind, After string
-	Limit              int
+	Query, Kind, Sort, After string
+	Limit                    int
 }
 type Repository interface {
 	Apply(context.Context, Event, string) error

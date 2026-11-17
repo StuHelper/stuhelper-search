@@ -40,7 +40,7 @@ func ActivityID(target Target, day string) string {
 	return target.Kind + "/" + encode(target.ID) + "/" + day
 }
 func ValidateActivity(d ActivitySnapshot) error {
-	if d.Target.Source != "catalog" || !validTarget(d.Target) || d.Revision < 1 || d.ID != ActivityID(d.Target, d.Day) {
+	if !validTarget(d.Target) || d.Revision < 1 || d.ID != ActivityID(d.Target, d.Day) {
 		return ErrInput
 	}
 	day, e := time.Parse(time.DateOnly, d.Day)
@@ -50,10 +50,19 @@ func ValidateActivity(d ActivitySnapshot) error {
 	var fields []string
 	switch d.Source {
 	case "catalog":
+		if d.Target.Source != "catalog" || (d.Target.Kind != "course" && d.Target.Kind != "teacher") {
+			return ErrInput
+		}
 		fields = []string{"views"}
 	case "reviews":
+		if d.Target.Source != "catalog" || (d.Target.Kind != "course" && d.Target.Kind != "teacher") {
+			return ErrInput
+		}
 		fields = []string{"reviews", "interactions"}
 	case "favorites":
+		if !((d.Target.Source == "catalog" && (d.Target.Kind == "course" || d.Target.Kind == "teacher")) || (d.Target.Source == "resources" && d.Target.Kind == "resource")) {
+			return ErrInput
+		}
 		fields = []string{"favorites"}
 	default:
 		return ErrInput

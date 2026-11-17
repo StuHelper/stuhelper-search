@@ -8,6 +8,8 @@ import (
 	"errors"
 	s "github.com/StuHelper/stuhelper-search"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"strings"
+	"time"
 )
 
 //go:embed schema.sql
@@ -46,9 +48,9 @@ func put(ctx context.Context, tx *sql.Tx, d s.Document, equal bool) error {
 	if e != nil {
 		return e
 	}
-	_, e = tx.ExecContext(ctx, `INSERT INTO search.documents(source,id,revision,data) VALUES($1,$2,$3,$4)
- ON CONFLICT(source,id) DO UPDATE SET revision=EXCLUDED.revision,data=EXCLUDED.data
- WHERE search.documents.revision < EXCLUDED.revision OR ($5 AND search.documents.revision=EXCLUDED.revision)`, d.Target.Source, d.Target.ID, d.Revision, b, equal)
+	_, e = tx.ExecContext(ctx, `INSERT INTO search.documents(source,id,revision,at_utc,data) VALUES($1,$2,$3,$4,$5)
+ ON CONFLICT(source,id) DO UPDATE SET revision=EXCLUDED.revision,at_utc=EXCLUDED.at_utc,data=EXCLUDED.data
+ WHERE search.documents.revision < EXCLUDED.revision OR ($6 AND search.documents.revision=EXCLUDED.revision)`, d.Target.Source, d.Target.ID, d.Revision, d.At.UTC(), b, equal)
 	return e
 }
 func (r *Repository) Apply(ctx context.Context, event s.Event, digest string) error {
@@ -84,7 +86,45 @@ func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, 
 	if e := r.DB.QueryRowContext(ctx, "SELECT ready FROM search.state WHERE id").Scan(&ready); e != nil || !ready {
 		return nil, s.ErrUnavailable
 	}
-	if f.Limit < 1 || f.Limit > 100 {
+	if f.Limit < 1 || f.Limit > 100 || (f.Sort != "" && f.Sort != "relevance" && f.Sort != "recent") {
+		return nil, s.ErrInput
+	}
+	if f.Sort == "recent" {
+		afterAt, afterSrc, afterID, hasCursor, e := s.ParseRecentAfter(f.After)
+		if e != nil {
+			return nil, e
+		}
+		rows, e := r.DB.QueryContext(ctx, `SELECT data, at_utc FROM search.documents WHERE (data->>'visible')::boolean AND at_utc IS NOT NULL
+ AND (NOT $1 OR (at_utc < $2 OR (at_utc = $2 AND (source COLLATE "C", id COLLATE "C") > ($3 COLLATE "C", $4 COLLATE "C"))))
+ AND ($5='' OR CASE WHEN data->'target'->>'kind'='school' AND $5 ~ '^[0-9]+$' THEN
+ id=$5 OR data->>'code'=$5
+ OR (length($5)=5 AND ((id ~ '^[0-9]{10}$' AND right(id,5)=$5) OR (data->>'code' ~ '^[0-9]{10}$' AND right(data->>'code',5)=$5)))
+ ELSE position(lower($5) in lower(data->>'title'))>0
+ OR (data->'target'->>'kind' IN ('school','course') AND (position(lower($5) in lower(data->>'code'))>0 OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(COALESCE(NULLIF(data->'aliases','null'::jsonb),'[]'::jsonb)) alias WHERE position(lower($5) in lower(alias))>0)))
+ OR (data->'target'->>'kind'='course' AND (position(lower($5) in lower(data->>'english_name'))>0 OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(COALESCE(NULLIF(data->'former_codes','null'::jsonb),'[]'::jsonb)||COALESCE(NULLIF(data->'former_names','null'::jsonb),'[]'::jsonb)) value WHERE position(lower($5) in lower(value))>0))) END)
+ AND ($6='' OR data->'target'->>'kind'=$6)
+ ORDER BY at_utc DESC, source COLLATE "C" ASC, id COLLATE "C" ASC LIMIT $7`, hasCursor, afterAt, afterSrc, afterID, f.Query, f.Kind, f.Limit)
+		if e != nil {
+			return nil, safe(e)
+		}
+		defer rows.Close()
+		out := []s.Document{}
+		for rows.Next() {
+			var b []byte
+			var atUTC time.Time
+			if e = rows.Scan(&b, &atUTC); e != nil {
+				return nil, safe(e)
+			}
+			var d s.Document
+			if e = json.Unmarshal(b, &d); e != nil {
+				return nil, s.ErrUnavailable
+			}
+			d.At = atUTC.UTC()
+			out = append(out, d)
+		}
+		return out, safe(rows.Err())
+	}
+	if strings.HasPrefix(f.After, "recent:") {
 		return nil, s.ErrInput
 	}
 	// Parameterized substring search gives literal semantics for %, _ and backslashes.

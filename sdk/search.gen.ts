@@ -114,6 +114,8 @@ export interface operations {
                 q?: string;
                 /** @description kind */
                 kind?: "school" | "course" | "teacher" | "review" | "resource";
+                /** @description 排序模式：relevance 为默认稳定排序，recent 按内容公开时间降序浏览最新内容。 */
+                sort?: "relevance" | "recent";
                 /** @description cursor */
                 cursor?: string;
                 /** @description limit */
@@ -184,8 +186,8 @@ export interface operations {
     popular: {
         parameters: {
             query: {
-                /** @description kind */
-                kind: "course" | "teacher";
+                /** @description 热门榜单目标类型（课程、教师或学习资料）。 */
+                kind: "course" | "teacher" | "resource";
                 /** @description cursor */
                 cursor?: string;
                 /** @description limit */

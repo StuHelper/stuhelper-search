@@ -274,28 +274,54 @@
               "maxLength": 512
             },
             "target": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "source": {
-                  "const": "catalog"
-                },
-                "kind": {
-                  "enum": [
-                    "course",
-                    "teacher"
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "source": {
+                      "const": "catalog"
+                    },
+                    "kind": {
+                      "enum": [
+                        "course",
+                        "teacher"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "kind",
+                    "id"
                   ]
                 },
-                "id": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 200
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "source": {
+                      "const": "resources"
+                    },
+                    "kind": {
+                      "const": "resource"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "kind",
+                    "id"
+                  ]
                 }
-              },
-              "required": [
-                "source",
-                "kind",
-                "id"
               ]
             },
             "day": {
