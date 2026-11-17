@@ -8,7 +8,7 @@ updated: 2026-11-18
 
 ## 当前行为
 
-OpenAPI 版本为 0.3.0，提供 `/api/v1/search`、`/api/v1/search/popular` 和 `/api/v1/search/my-votes` 三个 GET 接口。Go SDK 与 TypeScript 类型由接口定义生成。
+OpenAPI 版本为 0.4.0，提供 `/api/v1/search`、`/api/v1/search/popular` 和 `/api/v1/search/my-votes` 三个 GET 接口。Go SDK 与 TypeScript 类型由接口定义生成。
 
 search 通过来源公开事件构建可重建投影，索引只保存公开标题、来源 ID、修订号、学校、归属关系、活动计数及可见状态。search 不读取其他模块业务表，不保存评价正文、作者身份或五维评分数据。
 
@@ -28,11 +28,11 @@ HTTP 请求要求登录。Sources.Current 必须根据可信请求人、学校�
 
 ## 事件消费与重建
 
-事件 JSON Schema 位于 `contracts/discovery-event.schema.json`。
+事件 JSON Schema 位于 `contracts/discovery-event.schema.json`，相邻 `.sha256` 文件记录其 SHA-256 摘要并由模块检查核对。
 
 Service.Consume 接收 CloudEvents 1.0，source 为 catalog、reviews 或 resources，type 为来源名加 .discovery.v1，subject 与 data.target.id 一致。data 为完整 Document 快照，revision 为该来源对象单调递增修订号。
 
-消费在一个事务内更新投影及 inbox，以 source 和事件 ID 去重。重复事件返回成功，相同 ID 不同载荷拒绝。低于或等于现有修订的事件只记 inbox，不改投影。删除必须保留高修订的不可见墓碑。
+消费在一个事务内获取共享事务咨询锁，更新投影并以 `INSERT ... ON CONFLICT DO NOTHING` 写入 inbox 去重，支持多来源并发消费。重复事件返回成功，相同 ID 不同载荷拒绝。低于或等于现有修订的事件只记 inbox，不改投影。删除必须保留高修订的不可见墓碑。
 
 活动使用独立事件 `discovery.activity.v1`。Schema 为 `contracts/discovery-activity.schema.json`，版本 1.0.0；相邻 `.sha256` 文件记录原始 UTF-8 文件的 SHA-256，完整检查验证摘要及字段归属。内容事件仅承载检索文档。
 
@@ -110,15 +110,19 @@ relay、生产模块 outbox 与公开接口适配器由 backend 及来源负责�
 
 ## 验证范围
 
-scenario_tests 登记 DS-01、DS-04 至 DS-07。集成测试使用隔离 PostgreSQL，覆盖权限过滤、分页、热度权重与窗口、热门教师、当前投票、并发去重、旧修订、重建回滚及运行身份越权拒绝。
+scenario_tests 登记 DS-01、DS-04 至 DS-07、DS-SCHOOL-01 与 DS-COURSE-01。集成测试使用隔离 PostgreSQL，覆盖权限过滤、分页、热度权重与窗口、热门动态翻页、当前投票、多源并发共享锁消费、旧修订、重建回滚、SDK 端到端契约及运行身份越权拒绝。
 
 | 场景 | 验收结果 | 测试函数 |
 | --- | --- | --- |
+| DS-01：搜索与热门进入详情 | 当前权限过滤、分页游标、热门课程与教师动态续页及 SDK 契约一致 | TestVisibilityPaginationAndHotTargets、TestSDKEndToEndContractAndPopularDynamicPagination |
+| DS-04：我的投票 | 仅返回当前请求人有效且目标可见的投票，超限及超时按契约响应 | TestMyVotesHTTPAndTimeout、TestSDKEndToEndContractAndPopularDynamicPagination |
 | DS-05：热度配置 | 多来源汇总、来源缺失、权重、UTC 窗口、最低样本量及权限生效，越权指标拒绝 | TestHeatWeightsWindowAndTeachers、TestActivityOwnership |
 | DS-06：投影写入失败 | 投影与 inbox 事务整体回滚，不保留部分写入 | TestProjectionFailureRollback、TestActivityReplayAndRebuild |
-| DS-07：重复乱序与重建 | 重复事件去重，旧修订不覆盖新状态，重建失败回滚，运行身份越权被拒绝，内容类型受数据库约束 | TestContentDocumentKinds、TestProjectionReplayRebuildAndIsolation、TestActivityReplayAndRebuild、TestActivitySnapshotPagination |
+| DS-07：重复乱序与重建 | 重复事件去重，多来源共享锁并发写入与排他锁重建隔离，旧修订不覆盖新状态，运行身份越权拒绝 | TestContentDocumentKinds、TestProjectionReplayRebuildAndIsolation、TestActivityReplayAndRebuild、TestActivitySnapshotPagination、TestSharedAdvisoryLockAllowsConcurrentMultiSourceWrites |
+| DS-SCHOOL-01：学校检索 | 完整码、五位码、名称、别名、字面匹配、分页、当前撤权与迁移保留生效 | TestSchoolSearchCodesNamesAliasesCurrentRightsAndRebuild、TestSchoolProjectionMigrationPreservesExistingDocuments |
+| DS-COURSE-01：课程字段搜索 | 当前课名、课号、英文名、曾用课号与曾用名检索及事件边界校验生效 | TestCourseSearchIncludesCurrentFormerAndEnglishNames、TestCourseSearchFieldsValidateAtEventBoundary |
 
-2026-11-09 在隔离 PostgreSQL 18.6 上执行完整 make check，通过 SDK 一致性、仓库边界、文档、gofmt、vet、race 测试、构建及工作流检查。真实账号、跨模块 relay、来源接口适配器与生产部署均未验收。
+2026-11-18 在隔离 PostgreSQL 18.6 上执行完整 make check，通过 SDK 一致性、仓库与导入边界、Schema 摘要、文档、gofmt、vet、race 测试、构建及工作流检查。真实账号与生产部署尚未验收。
 
 ## 学校检索
 

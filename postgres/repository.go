@@ -36,10 +36,56 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 	return tx.Commit()
 }
 
-// Every writer takes this lock. Rebuild is atomic and relay deliveries wait until publication.
+// Rebuild takes the exclusive advisory lock; daily event consumption uses the shared advisory lock.
 func lock(ctx context.Context, tx *sql.Tx) error {
 	_, e := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(726391840130)")
 	return e
+}
+func lockShared(ctx context.Context, tx *sql.Tx) error {
+	_, e := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock_shared(726391840130)")
+	return e
+}
+func (r *Repository) withInboxTx(ctx context.Context, src, id, digest string, apply func(*sql.Tx) error) error {
+	tx, e := r.DB.BeginTx(ctx, nil)
+	if e != nil {
+		return safe(e)
+	}
+	defer tx.Rollback()
+	if e = lockShared(ctx, tx); e != nil {
+		return safe(e)
+	}
+	var old string
+	e = tx.QueryRowContext(ctx, "SELECT digest FROM search.inbox WHERE source=$1 AND id=$2", src, id).Scan(&old)
+	if e == nil {
+		if old != digest {
+			return s.ErrConflict
+		}
+		return nil
+	}
+	if !errors.Is(e, sql.ErrNoRows) {
+		return safe(e)
+	}
+	if e = apply(tx); e != nil {
+		return safe(e)
+	}
+	res, e := tx.ExecContext(ctx, "INSERT INTO search.inbox(source,id,digest) VALUES($1,$2,$3) ON CONFLICT (source,id) DO NOTHING", src, id, digest)
+	if e != nil {
+		return safe(e)
+	}
+	n, e := res.RowsAffected()
+	if e != nil {
+		return safe(e)
+	}
+	if n == 0 {
+		if e = tx.QueryRowContext(ctx, "SELECT digest FROM search.inbox WHERE source=$1 AND id=$2", src, id).Scan(&old); e != nil {
+			return safe(e)
+		}
+		if old != digest {
+			return s.ErrConflict
+		}
+		return nil
+	}
+	return safe(tx.Commit())
 }
 func put(ctx context.Context, tx *sql.Tx, d s.Document, equal bool) error {
 	b, e := json.Marshal(d)
@@ -52,32 +98,9 @@ func put(ctx context.Context, tx *sql.Tx, d s.Document, equal bool) error {
 	return e
 }
 func (r *Repository) Apply(ctx context.Context, event s.Event, digest string) error {
-	tx, e := r.DB.BeginTx(ctx, nil)
-	if e != nil {
-		return safe(e)
-	}
-	defer tx.Rollback()
-	if e = lock(ctx, tx); e != nil {
-		return safe(e)
-	}
-	var old string
-	e = tx.QueryRowContext(ctx, "SELECT digest FROM search.inbox WHERE source=$1 AND id=$2", event.Source, event.ID).Scan(&old)
-	if e == nil {
-		if old != digest {
-			return s.ErrConflict
-		}
-		return nil
-	}
-	if !errors.Is(e, sql.ErrNoRows) {
-		return safe(e)
-	}
-	if e = put(ctx, tx, event.Data, false); e != nil {
-		return safe(e)
-	}
-	if _, e = tx.ExecContext(ctx, "INSERT INTO search.inbox(source,id,digest) VALUES($1,$2,$3)", event.Source, event.ID, digest); e != nil {
-		return safe(e)
-	}
-	return safe(tx.Commit())
+	return r.withInboxTx(ctx, event.Source, event.ID, digest, func(tx *sql.Tx) error {
+		return put(ctx, tx, event.Data, false)
+	})
 }
 func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, error) {
 	var ready bool
