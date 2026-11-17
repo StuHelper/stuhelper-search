@@ -133,9 +133,20 @@ type Error struct {
 
 // Item defines model for Item.
 type Item struct {
-	SchoolId string `json:"school_id"`
-	Target   Target `json:"target"`
-	Title    string `json:"title"`
+	// Code 课程当前课程号或学校代码。
+	Code *string `json:"code,omitempty"`
+
+	// EnglishName 课程英文名。独立于 aliases；缺失时省略。
+	EnglishName *string `json:"english_name,omitempty"`
+
+	// FormerCodes 已确认属于同一课程的曾用课程号，可搜索。
+	FormerCodes *[]string `json:"former_codes,omitempty"`
+
+	// FormerNames 课程曾用名，可搜索并在详情显示；不包含英文名或曾用课程号。
+	FormerNames *[]string `json:"former_names,omitempty"`
+	SchoolId    string    `json:"school_id"`
+	Target      Target    `json:"target"`
+	Title       string    `json:"title"`
 }
 
 // Page defines model for Page.
@@ -290,6 +301,8 @@ type ClientInterface interface {
 
 	// Search 按当前权限过滤的全站搜索
 	//
+	// 课程同时按名称、课程号、曾用课程号、英文名和曾用名检索；每个结果返回当前规范课程 ID。.
+	//
 	// Corresponds with GET /api/v1/search (the `Search` operationId).
 	Search(ctx context.Context, params *SearchParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -305,6 +318,8 @@ type ClientInterface interface {
 }
 
 // Search 按当前权限过滤的全站搜索
+//
+// 课程同时按名称、课程号、曾用课程号、英文名和曾用名检索；每个结果返回当前规范课程 ID。.
 //
 // Corresponds with GET /api/v1/search (the `Search` operationId).
 func (c *Client) Search(ctx context.Context, params *SearchParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -625,6 +640,8 @@ type ClientWithResponsesInterface interface {
 
 	// SearchWithResponse 按当前权限过滤的全站搜索
 	//
+	// 课程同时按名称、课程号、曾用课程号、英文名和曾用名检索；每个结果返回当前规范课程 ID。.
+	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /api/v1/search (the `Search` operationId).
@@ -874,6 +891,8 @@ func (r PopularResponse) ContentType() string {
 }
 
 // SearchWithResponse 按当前权限过滤的全站搜索
+//
+// 课程同时按名称、课程号、曾用课程号、英文名和曾用名检索；每个结果返回当前规范课程 ID。.
 //
 // Returns a wrapper object for the known response body format(s).
 //
