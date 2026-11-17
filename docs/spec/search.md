@@ -60,7 +60,11 @@ search.documents 只保存 catalog 的 school、course、teacher，reviews 的 r
 
 重建与查询使用 PostgreSQL 事务隔离，查询保留旧的已提交投影，只有完整重建才发布新投影。失败整体回滚，低于已消费修订的快照拒绝。缺失对象保留不可见墓碑，延迟到达的旧事件无法复活内容。
 
-初次部署需要成功重建后才能查询。重建后的事件通过 relay 继续消费。inbox 与墓碑当前不自动清理，清理策略必须先确认来源重放期限。正常索引更新目标为 60 秒，尚未进行端到端延迟验证。
+初次部署需要成功重建后才能查询。`Service.Status` 与 `postgres.Repository.Status` 返回 `ready`、最近重建时间与窗口、各来源投影及 `inbox` 计数。`Config.Observer` 记录脱敏耗时、来源模块、错误分类码、扫描行数与修订跳过数，不记录查询词或用户身份。
+
+`search.inbox` 记录 `received_at` 时间。`postgres.Maintenance` 使用独立维护身份（仅授予 `inbox` 与 `activities` 的 `SELECT`、`DELETE`），按每批最多 1000 条、3 秒超时有界清理严格早于截止时间的回执与超窗活动快照。
+
+清理截止时间禁止落入 24 小时重放窗口与 366 天最大热度窗口内。正常索引更新目标为 60 秒，尚未进行端到端延迟验证。
 
 ## 来源事件与公开接口
 

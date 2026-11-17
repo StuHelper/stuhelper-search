@@ -70,55 +70,65 @@ func ValidateActivity(d ActivitySnapshot) error {
 	return nil
 }
 func (s *Service) ConsumeActivity(ctx context.Context, e ActivityEvent) error {
+	start := time.Now()
 	if e.SpecVersion != "1.0" || e.ID == "" || len(e.ID) > 200 || e.Type != "discovery.activity.v1" || e.Source != e.Data.Source || e.Subject != e.Data.ID || e.Time.IsZero() {
+		s.observe("consume_activity", "", "invalid_input", start, 0, 0)
 		return ErrInput
 	}
 	if err := ValidateActivity(e.Data); err != nil {
+		s.observe("consume_activity", e.Source, errorCode(err, "invalid_input"), start, 0, 0)
 		return err
 	}
 	b, err := json.Marshal(e)
 	if err != nil {
+		s.observe("consume_activity", e.Source, "invalid_input", start, 0, 0)
 		return ErrInput
 	}
 	h := sha256.Sum256(b)
 	ctx, cancel := context.WithTimeout(ctx, s.config.QueryTimeout)
 	defer cancel()
-	return s.repo.ApplyActivity(ctx, e, hex.EncodeToString(h[:]))
+	err = s.repo.ApplyActivity(ctx, e, hex.EncodeToString(h[:]))
+	s.observe("consume_activity", e.Source, errorCode(err, "storage_unavailable"), start, 1, 0)
+	return err
 }
 
 // Daily windows include the UTC day containing now-HeatWindow and the current day.
 // From is inclusive; To is the next UTC midnight, exclusive.
 func (s *Service) activityWindow() (time.Time, time.Time) {
-	now := s.config.Now().UTC()
+	return s.activityWindowAt(s.config.Now().UTC())
+}
+func (s *Service) activityWindowAt(now time.Time) (time.Time, time.Time) {
+	now = now.UTC()
 	return now.Add(-s.config.HeatWindow).Truncate(24 * time.Hour), now.Truncate(24 * time.Hour).Add(24 * time.Hour)
 }
-func (s *Service) rebuildActivities(ctx context.Context, put func([]ActivitySnapshot) error) error {
-	from, to := s.activityWindow()
+func (s *Service) rebuildActivitiesWindow(ctx context.Context, from, to time.Time, put func([]ActivitySnapshot) error) (string, string, int, error) {
+	scanned := 0
 	for _, source := range []string{"catalog", "reviews", "favorites"} {
 		cursor := ""
 		seen := map[string]bool{}
 		for pages := 0; ; pages++ {
 			if pages >= 10000 {
-				return ErrUnavailable
+				return source, "invalid_source_data", scanned, ErrUnavailable
 			}
 			docs, next, e := s.sources.ActivitySnapshot(ctx, source, from, to, cursor, 100)
 			if pages == 0 && errors.Is(e, ErrSourceDisabled) {
 				break
 			}
 			if e != nil {
-				return e
+				return source, "upstream_unavailable", scanned, e
 			}
 			if len(docs) > 100 || next != "" && (next == cursor || seen[next]) {
-				return ErrUnavailable
+				return source, "invalid_source_data", scanned, ErrUnavailable
 			}
 			seen[next] = true
 			for _, d := range docs {
+				scanned++
 				if ValidateActivity(d) != nil || d.Source != source || d.Day < from.Format(time.DateOnly) || d.Day >= to.Format(time.DateOnly) {
-					return ErrUnavailable
+					return source, "invalid_source_data", scanned, ErrUnavailable
 				}
 			}
 			if e = put(docs); e != nil {
-				return e
+				return "", "storage_unavailable", scanned, e
 			}
 			if next == "" {
 				break
@@ -126,5 +136,5 @@ func (s *Service) rebuildActivities(ctx context.Context, put func([]ActivitySnap
 			cursor = next
 		}
 	}
-	return nil
+	return "", "", scanned, nil
 }

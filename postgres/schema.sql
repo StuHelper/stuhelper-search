@@ -17,9 +17,15 @@ ALTER TABLE search.documents ADD CONSTRAINT documents_content_kind CHECK ((
 ) IS TRUE);
 CREATE INDEX IF NOT EXISTS search_visible_key ON search.documents(source,id) WHERE (data->>'visible')::boolean;
 CREATE TABLE IF NOT EXISTS search.inbox (
- source text NOT NULL, id text NOT NULL, digest text NOT NULL, PRIMARY KEY(source,id)
+ source text NOT NULL, id text NOT NULL, digest text NOT NULL,
+ received_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(source,id)
 );
+ALTER TABLE search.inbox ADD COLUMN IF NOT EXISTS received_at timestamptz NOT NULL DEFAULT now();
+CREATE INDEX IF NOT EXISTS search_inbox_received_at ON search.inbox(received_at, source, id);
 CREATE TABLE IF NOT EXISTS search.state (id boolean PRIMARY KEY DEFAULT true CHECK(id), ready boolean NOT NULL);
+ALTER TABLE search.state ADD COLUMN IF NOT EXISTS rebuilt_at timestamptz;
+ALTER TABLE search.state ADD COLUMN IF NOT EXISTS activity_from date;
+ALTER TABLE search.state ADD COLUMN IF NOT EXISTS activity_to date;
 INSERT INTO search.state(id,ready) VALUES(true,false) ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS search.activities (
  source text NOT NULL CHECK(source IN ('catalog','reviews','favorites')),
@@ -28,5 +34,6 @@ CREATE TABLE IF NOT EXISTS search.activities (
  data jsonb NOT NULL, PRIMARY KEY(source,id), UNIQUE(source,kind,object_id,day)
 );
 CREATE INDEX IF NOT EXISTS search_activity_window ON search.activities(kind,day);
+CREATE INDEX IF NOT EXISTS search_activities_day_key ON search.activities(day, source, id);
 REVOKE ALL ON SCHEMA search FROM PUBLIC;
 REVOKE ALL ON ALL TABLES IN SCHEMA search FROM PUBLIC;
