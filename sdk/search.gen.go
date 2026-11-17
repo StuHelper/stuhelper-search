@@ -185,7 +185,7 @@ type Votes struct {
 
 // SearchParams defines parameters for Search.
 type SearchParams struct {
-	// Q Trim surrounding whitespace. School numeric id/code queries match exactly; five digits also match the suffix of a ten-digit id/code. Names and registered aliases use case-insensitive literal substring matching.
+	// Q 检索关键词，执行 NFKC 全半角规范化并按空白拆分为最多 5 个词元做组合匹配。学校纯数字词元精确匹配 ID、代码或十位代码的后五位；其余按不区分大小写的字面子串匹配并按相关性分桶排序。
 	Q *string `form:"q,omitempty" json:"q,omitempty"`
 
 	// Kind kind

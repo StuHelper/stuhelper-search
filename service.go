@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"golang.org/x/text/unicode/norm"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -44,15 +46,23 @@ func validTarget(t Target) bool {
 	return len(t.ID) > 0 && len(t.ID) <= 200 && !strings.ContainsRune(t.ID, 0) && ((t.Source == "catalog" && (t.Kind == "school" || t.Kind == "course" || t.Kind == "teacher")) || (t.Source == "reviews" && t.Kind == "review") || (t.Source == "resources" && t.Kind == "resource"))
 }
 func Validate(d Document) error {
-	if d.Target.Kind == "school" || d.Target.Kind == "course" {
-		if d.Target.Kind == "school" && d.Target.ID != d.SchoolID {
+	switch d.Target.Kind {
+	case "school":
+		if d.Target.ID != d.SchoolID || !searchText(d.Code, 128) || !searchNames(d.Aliases, 256) {
 			return ErrInput
 		}
+	case "course":
 		if !searchText(d.Code, 128) || !searchNames(d.Aliases, 256) {
 			return ErrInput
 		}
-	} else if d.Code != "" || len(d.Aliases) != 0 {
-		return ErrInput
+	case "teacher":
+		if d.Code != "" || !searchNames(d.Aliases, 256) {
+			return ErrInput
+		}
+	default:
+		if d.Code != "" || len(d.Aliases) != 0 {
+			return ErrInput
+		}
 	}
 	if d.Target.Kind == "course" {
 		if !searchText(d.EnglishName, 256) || !searchNames(d.FormerCodes, 128) || !searchNames(d.FormerNames, 256) {
@@ -169,29 +179,38 @@ func auth(user string) error {
 	return nil
 }
 func (s *Service) Search(ctx context.Context, user, q, kind, cursor string, limit int) (Page, error) {
-	q = strings.TrimSpace(q)
 	out := Page{Items: []Item{}}
 	if e := auth(user); e != nil {
 		return out, e
 	}
-	if utf8.RuneCountInString(q) > 200 || limit < 1 || limit > 100 || kind != "" && kind != "school" && kind != "course" && kind != "teacher" && kind != "review" && kind != "resource" {
+	q = strings.TrimSpace(q)
+	if !searchText(q, 200) || limit < 1 || limit > 100 || kind != "" && kind != "school" && kind != "course" && kind != "teacher" && kind != "review" && kind != "resource" {
 		return out, ErrInput
 	}
+	normQ, terms := NormalizeQuery(q)
 	after, e := decode(cursor)
 	if e != nil {
 		return out, e
+	}
+	if after != "" {
+		if !strings.Contains(after, ":") {
+			return out, ErrInput
+		}
+		if _, _, _, _, _, err := ParseSearchAfter(after, normQ != ""); err != nil {
+			return out, err
+		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.config.QueryTimeout)
 	defer cancel()
 	// The cursor tracks examined candidates, so invisible entries cannot stall pagination.
 	for scanned := 0; scanned < 10000; {
-		docs, e := s.repo.Candidates(ctx, Filter{Query: q, Kind: kind, After: after, Limit: 100})
+		docs, e := s.repo.Candidates(ctx, Filter{Query: normQ, Kind: kind, After: after, Limit: 100})
 		if e != nil {
 			return out, e
 		}
 		for _, d := range docs {
 			scanned++
-			after = key(d)
+			after = SearchAfterToken(d, normQ, terms)
 			live, ok, e := s.current(ctx, user, d)
 			if e != nil {
 				return Page{}, e
@@ -376,4 +395,153 @@ func searchNames(values []string, max int) bool {
 }
 func documentItem(d Document) Item {
 	return Item{Target: d.Target, Title: d.Title, SchoolID: d.SchoolID, Code: d.Code, EnglishName: d.EnglishName, FormerCodes: append([]string{}, d.FormerCodes...), FormerNames: append([]string{}, d.FormerNames...)}
+}
+
+// NormalizeQuery applies Unicode NFKC normalization and splits into at most 5 non-empty tokens.
+func NormalizeQuery(q string) (string, []string) {
+	normQ := strings.TrimSpace(norm.NFKC.String(q))
+	if normQ == "" {
+		return "", nil
+	}
+	fields := strings.Fields(normQ)
+	full := strings.Join(fields, " ")
+	if len(fields) <= 5 {
+		return full, fields
+	}
+	terms := append([]string(nil), fields[:4]...)
+	terms = append(terms, strings.Join(fields[4:], " "))
+	return full, terms
+}
+
+func foldSearch(s string) string {
+	return strings.ToLower(norm.NFKC.String(s))
+}
+
+func isASCIIAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func kindPriority(kind string, hasQuery bool) int {
+	if !hasQuery {
+		return 0
+	}
+	switch kind {
+	case "school":
+		return 1
+	case "course":
+		return 2
+	case "teacher":
+		return 3
+	case "resource":
+		return 4
+	case "review":
+		return 5
+	default:
+		return 6
+	}
+}
+
+func rankBucket(d Document, normQ string, terms []string) int {
+	if normQ == "" {
+		return 0
+	}
+	lq := foldSearch(normQ)
+	title := foldSearch(d.Title)
+	code := foldSearch(d.Code)
+	eng := foldSearch(d.EnglishName)
+
+	if d.Target.Kind == "school" && isASCIIAllDigits(normQ) {
+		normCode := norm.NFKC.String(d.Code)
+		if d.Target.ID == normQ || normCode == normQ || (len(normQ) == 5 && ((len(d.Target.ID) == 10 && isASCIIAllDigits(d.Target.ID) && d.Target.ID[5:] == normQ) || (len(normCode) == 10 && isASCIIAllDigits(normCode) && normCode[5:] == normQ))) {
+			return 0
+		}
+	}
+	if title == lq || ((d.Target.Kind == "school" || d.Target.Kind == "course") && code != "" && code == lq) {
+		return 0
+	}
+	if d.Target.Kind == "course" {
+		if eng != "" && eng == lq {
+			return 0
+		}
+		for _, fc := range d.FormerCodes {
+			if foldSearch(fc) == lq {
+				return 0
+			}
+		}
+	}
+
+	if strings.HasPrefix(title, lq) || ((d.Target.Kind == "school" || d.Target.Kind == "course") && code != "" && strings.HasPrefix(code, lq)) || (d.Target.Kind == "course" && eng != "" && strings.HasPrefix(eng, lq)) {
+		return 1
+	}
+
+	allTitle := true
+	for _, t := range terms {
+		if !strings.Contains(title, foldSearch(t)) {
+			allTitle = false
+			break
+		}
+	}
+	if allTitle {
+		return 2
+	}
+	if d.Target.Kind == "course" && eng != "" {
+		allEng := true
+		for _, t := range terms {
+			if !strings.Contains(eng, foldSearch(t)) {
+				allEng = false
+				break
+			}
+		}
+		if allEng {
+			return 2
+		}
+	}
+	return 3
+}
+
+// SearchAfterToken encodes (rank_bucket, kind_priority, source, id) for keyset pagination.
+func SearchAfterToken(d Document, normQ string, terms []string) string {
+	return fmt.Sprintf("%d:%d:%s/%s", rankBucket(d, normQ, terms), kindPriority(d.Target.Kind, normQ != ""), d.Target.Source, d.Target.ID)
+}
+
+// ParseSearchAfter parses either "<bucket>:<kind_priority>:<source>/<id>" or direct "<source>/<id>".
+func ParseSearchAfter(after string, hasQuery bool) (int, int, string, string, bool, error) {
+	if after == "" {
+		return 0, 0, "", "", false, nil
+	}
+	if !utf8.ValidString(after) || strings.ContainsRune(after, 0) {
+		return 0, 0, "", "", false, ErrInput
+	}
+	if !strings.Contains(after, ":") {
+		src, id, ok := strings.Cut(after, "/")
+		if !ok || src == "" || id == "" || len(id) > 200 || (src != "catalog" && src != "reviews" && src != "resources") {
+			return 0, 0, "", "", false, ErrInput
+		}
+		return 0, 0, src, id, true, nil
+	}
+	parts := strings.SplitN(after, ":", 3)
+	if len(parts) != 3 {
+		return 0, 0, "", "", false, ErrInput
+	}
+	bucket, err := strconv.Atoi(parts[0])
+	if err != nil || bucket < 0 || bucket > 3 || (!hasQuery && bucket != 0) {
+		return 0, 0, "", "", false, ErrInput
+	}
+	kr, err := strconv.Atoi(parts[1])
+	if err != nil || (!hasQuery && kr != 0) || (hasQuery && (kr < 1 || kr > 5)) {
+		return 0, 0, "", "", false, ErrInput
+	}
+	src, id, ok := strings.Cut(parts[2], "/")
+	if !ok || src == "" || id == "" || len(id) > 200 || (src != "catalog" && src != "reviews" && src != "resources") {
+		return 0, 0, "", "", false, ErrInput
+	}
+	return bucket, kr, src, id, true, nil
 }
