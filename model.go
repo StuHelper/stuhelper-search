@@ -21,6 +21,11 @@ type Target struct {
 	Kind   string `json:"kind"`
 }
 type Item struct {
+	Code        string   `json:"code,omitempty"`
+	EnglishName string   `json:"english_name,omitempty"`
+	FormerCodes []string `json:"former_codes,omitempty"`
+	FormerNames []string `json:"former_names,omitempty"`
+
 	Target   Target `json:"target"`
 	Title    string `json:"title"`
 	SchoolID string `json:"school_id"`
@@ -28,6 +33,10 @@ type Item struct {
 
 // Document is a source-owned public projection snapshot, never review body or identity data.
 type Document struct {
+	EnglishName string   `json:"english_name,omitempty"`
+	FormerCodes []string `json:"former_codes,omitempty"`
+	FormerNames []string `json:"former_names,omitempty"`
+
 	Code       string    `json:"code,omitempty"`
 	Aliases    []string  `json:"aliases,omitempty"`
 	Target     Target    `json:"target"`

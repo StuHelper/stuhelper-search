@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "StuHelper Search",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "paths": {
     "/api/v1/search": {
@@ -124,7 +124,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "课程同时按名称、课程号、曾用课程号、英文名和曾用名检索；每个结果返回当前规范课程 ID。"
       }
     },
     "/api/v1/search/popular": {
@@ -379,6 +380,38 @@
           },
           "school_id": {
             "type": "string"
+          },
+          "english_name": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "课程英文名。独立于 aliases；缺失时省略。"
+          },
+          "former_codes": {
+            "type": "array",
+            "maxItems": 50,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "已确认属于同一课程的曾用课程号，可搜索。"
+          },
+          "former_names": {
+            "type": "array",
+            "maxItems": 50,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "description": "课程曾用名，可搜索并在详情显示；不包含英文名或曾用课程号。"
+          },
+          "code": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "课程当前课程号或学校代码。"
           }
         },
         "required": [

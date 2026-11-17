@@ -93,7 +93,8 @@ func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, 
  id=$2 OR data->>'code'=$2
  OR (length($2)=5 AND ((id ~ '^[0-9]{10}$' AND right(id,5)=$2) OR (data->>'code' ~ '^[0-9]{10}$' AND right(data->>'code',5)=$2)))
  ELSE position(lower($2) in lower(data->>'title'))>0
- OR (data->'target'->>'kind'='school' AND (position(lower($2) in lower(data->>'code'))>0 OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(COALESCE(data->'aliases','[]'::jsonb)) alias WHERE position(lower($2) in lower(alias))>0))) END)
+ OR (data->'target'->>'kind' IN ('school','course') AND (position(lower($2) in lower(data->>'code'))>0 OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(COALESCE(NULLIF(data->'aliases','null'::jsonb),'[]'::jsonb)) alias WHERE position(lower($2) in lower(alias))>0)))
+ OR (data->'target'->>'kind'='course' AND (position(lower($2) in lower(data->>'english_name'))>0 OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(COALESCE(NULLIF(data->'former_codes','null'::jsonb),'[]'::jsonb)||COALESCE(NULLIF(data->'former_names','null'::jsonb),'[]'::jsonb)) value WHERE position(lower($2) in lower(value))>0))) END)
  AND ($3='' OR data->'target'->>'kind'=$3)
  ORDER BY source||'/'||id LIMIT $4`, f.After, f.Query, f.Kind, f.Limit)
 	if e != nil {
