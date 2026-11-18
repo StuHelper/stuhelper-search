@@ -55,7 +55,8 @@ BEGIN
   REVOKE ALL ON SCHEMA search FROM PUBLIC;
  END IF;
  FOREACH tbl IN ARRAY ARRAY['search.documents', 'search.inbox', 'search.state', 'search.activities'] LOOP
-  IF has_table_privilege('public', tbl, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') THEN
+  IF EXISTS (SELECT 1 FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) acl
+             WHERE c.oid=tbl::regclass AND acl.grantee=0) THEN
    EXECUTE format('REVOKE ALL ON TABLE %s FROM PUBLIC', tbl);
   END IF;
  END LOOP;

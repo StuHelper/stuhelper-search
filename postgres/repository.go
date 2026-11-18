@@ -175,14 +175,14 @@ func (r *Repository) CheckRuntime(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var unsafe bool
-	e := r.DB.QueryRowContext(ctx, `SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolbypassrls
+	e := r.DB.QueryRowContext(ctx, `WITH owners AS (
+			SELECT nspowner AS owner FROM pg_namespace WHERE nspname = 'search'
+			UNION
+			SELECT c.relowner FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'search'
+		) SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolbypassrls OR rolreplication
 		OR has_schema_privilege(current_user, 'search', 'CREATE')
-		OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'search' AND nspowner = current_user::regrole)
-		OR EXISTS (
-			SELECT 1 FROM pg_class c
-			JOIN pg_namespace n ON n.oid = c.relnamespace
-			WHERE n.nspname = 'search' AND c.relowner = current_user::regrole
-		)
+		OR EXISTS (SELECT 1 FROM owners WHERE pg_has_role(current_user, owner,
+			CASE WHEN current_setting('server_version_num')::int >= 160000 THEN 'USAGE,SET' ELSE 'MEMBER' END))
 		FROM pg_roles WHERE rolname = current_user`).Scan(&unsafe)
 	if e != nil || unsafe {
 		return s.ErrUnavailable

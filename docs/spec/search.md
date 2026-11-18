@@ -1,7 +1,7 @@
 ---
 type: spec
 status: Accepted
-updated: 2026-11-18
+updated: 2026-11-19
 ---
 
 # 搜索与热门发现模块
@@ -95,6 +95,8 @@ CurrentActivity(ctx context.Context, principal, activityID string) (search.Activ
 ```
 
 ActivitySnapshot 返回窗口内完整日快照及墓碑。CurrentActivity 返回当前可读的快照；bool=false 表示目标不存在或不可读。来源未启用由 backend 适配器返回 ErrSourceDisabled，不能把普通来源故障映射为未启用。
+
+PostgreSQL 14 及更早版本的升级库可能保留 PUBLIC 对 public schema 的 CREATE 权限。数据库负责人应先执行 `REVOKE CREATE ON SCHEMA public FROM PUBLIC`。运行身份可保留 public 的 USAGE，并须通过复制权限和搜索对象属主角色检查。[PostgreSQL 文档](https://www.postgresql.org/docs/15/ddl-schemas.html#DDL-SCHEMAS-PRIV)
 
 ## Backend 装配
 

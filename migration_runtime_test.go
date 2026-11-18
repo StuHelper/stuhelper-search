@@ -91,6 +91,49 @@ func TestIdempotentMigrateLockFreeAndStrictRuntimePrivilegeChecks(t *testing.T) 
 		t.Fatalf("minimal valid runtime role rejected: %v", err)
 	}
 
+	const minimum = `GRANT USAGE ON SCHEMA search TO %[1]s;
+		GRANT SELECT,INSERT,UPDATE ON search.documents,search.activities TO %[1]s;
+		GRANT SELECT,UPDATE ON search.state TO %[1]s;
+		GRANT SELECT,INSERT ON search.inbox TO %[1]s;`
+	if err := checkWithRole("replication", minimum+"ALTER ROLE %[1]s REPLICATION"); !errors.Is(err, s.ErrUnavailable) {
+		t.Errorf("replication-capable identity accepted: %v", err)
+	}
+	if _, err := db.Exec("GRANT CREATE ON SCHEMA public TO PUBLIC"); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkWithRole("public_create", minimum); !errors.Is(err, s.ErrUnavailable) {
+		t.Errorf("public CREATE accepted: %v", err)
+	}
+	if _, err := db.Exec("REVOKE CREATE ON SCHEMA public FROM PUBLIC"); err != nil {
+		t.Fatal(err)
+	}
+	var version int
+	if err := db.QueryRow("SHOW server_version_num").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version >= 160000 {
+		owner := fmt.Sprintf("rt_table_owner_%d", time.Now().UnixNano())
+		if _, err := db.Exec("CREATE ROLE " + owner + " NOLOGIN; CREATE TABLE search.owner_check(id int); ALTER TABLE search.owner_check OWNER TO " + owner); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = db.Exec("DROP TABLE IF EXISTS search.owner_check; DROP ROLE IF EXISTS " + owner) })
+		if err := checkWithRole("can_set_owner", minimum+"GRANT "+owner+" TO %[1]s WITH INHERIT FALSE, SET TRUE"); !errors.Is(err, s.ErrUnavailable) {
+			t.Errorf("owner membership accepted: %v", err)
+		}
+	}
+	if version >= 170000 {
+		if _, err := db.Exec("GRANT MAINTAIN ON search.documents TO PUBLIC"); err != nil {
+			t.Fatal(err)
+		}
+		if err := postgres.Migrate(ctx, db); err != nil {
+			t.Fatal(err)
+		}
+		var allowed bool
+		if err := db.QueryRow("SELECT has_table_privilege('public','search.documents','MAINTAIN')").Scan(&allowed); err != nil || allowed {
+			t.Errorf("PUBLIC MAINTAIN survived migration: %v %v", allowed, err)
+		}
+	}
+
 	// 2. Backend-style valid role (DELETE on projections, REVOKE UPDATE,DELETE on inbox, no TRUNCATE) MUST pass.
 	if err := checkWithRole("backend_valid", `
 		GRANT USAGE ON SCHEMA search TO %[1]s;
