@@ -98,7 +98,7 @@ ActivitySnapshot 返回窗口内完整日快照及墓碑。CurrentActivity 返�
 
 ## Backend 装配
 
-1. 使用独立迁移身份调用 postgres.Migrate。创建 search 专用运行身份，只授予 schema USAGE，documents、activities 与 state 的 SELECT、INSERT、UPDATE，以及 inbox 的 SELECT、INSERT。禁止访问其他模块表。
+1. 使用独立迁移身份调用 postgres.Migrate。创建专用运行身份，授予 schema USAGE，documents 与 activities 的 SELECT、INSERT、UPDATE，state 的 SELECT、UPDATE，inbox 的 SELECT、INSERT；禁止 inbox 改删、各表 TRUNCATE 及跨模块访问。
 2. 创建运行身份连接池，设置连接数与连接超时，调用 CheckRuntime。实现 Sources，以各模块公开接口提供当前权限查询、重建快照及我的投票。
 3. 从后台配置读取最低活动样本量、热度窗口、权重和查询超时，调用 New。使用后台重建任务调用 Rebuild，成功后开放 HTTP 能力。
 4. 把 httpapi.Handler 挂到 /api/v1/search 路由，Authenticate 从 platform 已验证身份提取稳定请求人标识，不能接受客户端自报的用户或学校。
@@ -130,7 +130,7 @@ q 去除首尾空白。纯数字精确匹配学校 ID 或 code，五位数字也
 
 返回前继续通过来源公开端口检查当前权限、可见性和修订。来源故障返回 unavailable，旧别名投影不绕过修订检查。完整重建发布新快照；学校停用后立即不可见，旧事件不能恢复旧修订。
 
-迁移在事务中扩大 documents_content_kind 约束以接纳学校，保留已有投影与 inbox。升级后执行提供方支持的重建，确保学校与别名完整进入索引。学校不参与热门活动计数。
+迁移仅在约束缺失或未包含学校类型时通过 NOT VALID 与 VALIDATE CONSTRAINT 扩大 documents_content_kind 约束，一致时跳过 DDL，避免滚动升级阻塞线上读写，并保留已有投影与 inbox。升级后执行提供方支持的重建，确保学校与别名完整进入索引。学校不参与热门活动计数。
 
 DS-SCHOOL-01 覆盖完整码、五位码、名称、别名、无结果、字面匹配、分页、当前撤权与别名修订重建。
 

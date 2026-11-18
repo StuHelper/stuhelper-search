@@ -8,13 +8,32 @@ CREATE TABLE IF NOT EXISTS search.documents (
    OR (source='resources' AND data->'target'->>'kind'='resource')
  ) IS TRUE)
 );
--- Expand the accepted catalog kinds without deleting existing projections.
-ALTER TABLE search.documents DROP CONSTRAINT IF EXISTS documents_content_kind;
-ALTER TABLE search.documents ADD CONSTRAINT documents_content_kind CHECK ((
- (source='catalog' AND data->'target'->>'kind' IN ('school','course','teacher'))
- OR (source='reviews' AND data->'target'->>'kind'='review')
- OR (source='resources' AND data->'target'->>'kind'='resource')
-) IS TRUE);
+-- Expand accepted catalog kinds only when needed; use NOT VALID + VALIDATE to avoid AccessExclusive full-table scans.
+DO $$
+DECLARE
+ def text;
+ valid boolean;
+BEGIN
+ SELECT pg_get_constraintdef(oid), convalidated
+   INTO def, valid
+   FROM pg_constraint
+  WHERE conrelid = 'search.documents'::regclass
+    AND conname = 'documents_content_kind';
+
+ IF def IS NULL OR position('''school''' in def) = 0 THEN
+  IF def IS NOT NULL THEN
+   ALTER TABLE search.documents DROP CONSTRAINT documents_content_kind;
+  END IF;
+  ALTER TABLE search.documents ADD CONSTRAINT documents_content_kind CHECK ((
+   (source='catalog' AND data->'target'->>'kind' IN ('school','course','teacher'))
+   OR (source='reviews' AND data->'target'->>'kind'='review')
+   OR (source='resources' AND data->'target'->>'kind'='resource')
+  ) IS TRUE) NOT VALID;
+  ALTER TABLE search.documents VALIDATE CONSTRAINT documents_content_kind;
+ ELSIF NOT valid THEN
+  ALTER TABLE search.documents VALIDATE CONSTRAINT documents_content_kind;
+ END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS search_visible_key ON search.documents(source,id) WHERE (data->>'visible')::boolean;
 CREATE TABLE IF NOT EXISTS search.inbox (
  source text NOT NULL, id text NOT NULL, digest text NOT NULL, PRIMARY KEY(source,id)
@@ -28,5 +47,16 @@ CREATE TABLE IF NOT EXISTS search.activities (
  data jsonb NOT NULL, PRIMARY KEY(source,id), UNIQUE(source,kind,object_id,day)
 );
 CREATE INDEX IF NOT EXISTS search_activity_window ON search.activities(kind,day);
-REVOKE ALL ON SCHEMA search FROM PUBLIC;
-REVOKE ALL ON ALL TABLES IN SCHEMA search FROM PUBLIC;
+DO $$
+DECLARE
+ tbl text;
+BEGIN
+ IF has_schema_privilege('public', 'search', 'USAGE,CREATE') THEN
+  REVOKE ALL ON SCHEMA search FROM PUBLIC;
+ END IF;
+ FOREACH tbl IN ARRAY ARRAY['search.documents', 'search.inbox', 'search.state', 'search.activities'] LOOP
+  IF has_table_privilege('public', tbl, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') THEN
+   EXECUTE format('REVOKE ALL ON TABLE %s FROM PUBLIC', tbl);
+  END IF;
+ END LOOP;
+END $$;
