@@ -154,7 +154,7 @@ func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, 
 		return nil, safe(e)
 	}
 	if !ready {
-		return nil, s.ErrUnavailable
+		return nil, s.ErrIndexBuilding
 	}
 	afterSource, afterID, ok := splitAfter(f.After)
 	if !ok || f.Limit < 1 || f.Limit > 100 || !validDBString(f.Query) || !validDBString(f.After) || !validDBString(f.Kind) {

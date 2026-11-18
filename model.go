@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -11,6 +12,7 @@ var (
 	ErrUnauthenticated = errors.New("unauthenticated")
 	ErrNotFound        = errors.New("not_found")
 	ErrUnavailable     = errors.New("unavailable")
+	ErrIndexBuilding   = fmt.Errorf("%w: index_building", ErrUnavailable)
 	ErrSourceDisabled  = errors.New("source_disabled")
 	ErrConflict        = errors.New("event_conflict")
 )
@@ -60,6 +62,7 @@ type Event struct {
 type Page struct {
 	Items      []Item `json:"items"`
 	NextCursor string `json:"next_cursor"`
+	WindowDays int    `json:"window_days,omitempty"`
 }
 type Vote struct {
 	Target Target `json:"target"`

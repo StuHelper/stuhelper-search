@@ -8,7 +8,9 @@ updated: 2026-11-19
 
 ## 当前行为
 
-OpenAPI 版本为 0.3.0，提供 `/api/v1/search`、`/api/v1/search/popular` 和 `/api/v1/search/my-votes` 三个 GET 接口。Go SDK 与 TypeScript 类型由接口定义生成。
+OpenAPI 版本为 0.4.0，提供 `/api/v1/search`、`/api/v1/search/popular` 和 `/api/v1/search/my-votes` 三个 GET 接口。Go SDK 与 TypeScript 类型由接口定义生成。
+
+错误响应 `Error.code` 使用固定枚举（`invalid_input`、`unauthenticated`、`not_found`、`index_building`、`unavailable`、`timeout`）；首次部署尚未完成重建时返回 `503 index_building`，所有 `503` 响应携带 `Retry-After` 头供客户端重试与多语言状态提示。
 
 search 通过来源公开事件构建可重建投影，索引只保存公开标题、来源 ID、修订号、学校、归属关系、活动计数及可见状态。search 不读取其他模块业务表，不保存评价正文、作者身份或五维评分数据。
 
@@ -22,7 +24,7 @@ HTTP 请求要求登录。身份服务暂不可用或超时分别返回 503 或 
 
 我的投票委托 reviews 的当前请求人公开接口，只返回有效选择并再次检查目标权限，修改及取消使用 reviews 自身接口。
 
-热门排行按对象汇总窗口内各来源的日快照，再用后台权重计算热度。权重顺序为浏览、评价、收藏、互动。最低样本量使用四项有效计数之和，与权重无关。按加权热度降序，同分按来源和对象 ID 排序。
+热门排行按对象汇总窗口内各来源的日快照，再用后台权重计算热度。权重顺序为浏览、评价、收藏、互动。最低样本量使用四项有效计数之和，与权重无关。按加权热度降序，同分按来源和对象 ID 排序，并在响应中返回 `window_days` 供客户端展示统计窗口说明。
 
 窗口按 UTC 日查询，开始为 now−HeatWindow 所在日的零点（包含），结束为当前日之后的零点（不包含）。当前日使用已提交快照，窗口参数和当前时间在单次查询或重建开始时固定。
 
