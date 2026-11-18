@@ -32,13 +32,17 @@ HTTP 请求要求登录。身份服务暂不可用或超时分别返回 503 或 
 
 Service.Consume 接收 CloudEvents 1.0，source 为 catalog、reviews 或 resources，type 为来源名加 .discovery.v1，subject 与 data.target.id 一致。data 为完整 Document 快照，revision 为该来源对象单调递增修订号。
 
-消费在一个事务内更新投影及 inbox，以 source 和事件 ID 去重。重复事件返回成功，相同 ID 不同载荷拒绝。低于或等于现有修订的事件只记 inbox，不改投影。删除必须保留高修订的不可见墓碑。
+消费在一个事务内更新投影及 inbox，以 source、event_type 和事件 ID 去重，并记录接收时间 received_at。摘要计算前将时间戳归一化为 UTC 并统一空切片，避免相同时刻不同时区重放误报冲突。
 
-活动使用独立事件 `discovery.activity.v1`。Schema 为 `contracts/discovery-activity.schema.json`，版本 1.0.0；相邻 `.sha256` 文件记录原始 UTF-8 文件的 SHA-256，完整检查验证摘要及字段归属。内容事件仅承载检索文档。
+所有检索词、游标和事件字符串均按 Unicode 码点数限长，并拒绝非法 UTF-8 与 NUL 字节。重复事件返回成功，相同标识不同载荷拒绝。低于或等于现有修订的事件只记 inbox，不改投影。删除必须保留高修订的不可见墓碑。
+
+活动使用独立事件 `discovery.activity.v1`。Schema 为 `contracts/discovery-activity.schema.json`，版本 1.1.0；相邻 `.sha256` 文件记录原始 UTF-8 文件的 SHA-256，完整检查验证摘要及字段归属。内容事件仅承载检索文档。
 
 活动快照保存在 search.activities，主键为 (source, id)，另以 (source, target.kind, target.id, day) 设置唯一约束。target.source 固定为 catalog，目标为一个规范课程或教师；课程活动不会自动复制到关联教师。
 
 活动 ID 使用 `kind + "/" + base64url(UTF-8 对象 ID，无填充) + "/" + YYYY-MM-DD`，由 ActivityID 生成。事件 subject 等于活动 ID，封套 source 必须等于快照 source。不同来源可使用相同活动 ID，修订独立递增。
+
+活动目标 ID 最多 200 个 Unicode 码点。完整活动 ID 和 subject 最多 1,086 个字符，覆盖四字节码点编码后的长度。搜索与热门游标最多 2,048 字符。升级前的 inbox 回执继续按原事件表示计算摘要，并保留原来源与 ID 的去重范围。
 
 新修订完整替换同键快照，不把重复投递当作增量相加。零计数也必须显式发送。取消收藏、撤回或删除引起计数变化时，由拥有事实的模块发布更高修订；search 不反推来源事实。
 

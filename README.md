@@ -6,7 +6,7 @@ search 提供学校代码、名称与别名检索，以及关键词搜索、热�
 
 OpenAPI 版本为 0.3.0，HTTP 路径与响应未变化，接口定义位于 `contracts/search.openapi.json`，Go 和 TypeScript SDK 位于 `sdk/`。详细数据约定、事件缺口及装配步骤见 [模块说明](docs/spec/search.md)。
 
-热门活动由 catalog（浏览）、reviews（评价与互动）、favorites（收藏）分别提供日快照。活动事件使用 `discovery.activity.v1`，契约见 `contracts/discovery-activity.schema.json`（1.0.0），摘要见相邻 `.sha256` 文件。来源接口签名及字段规则见模块说明。
+热门活动由 catalog（浏览）、reviews（评价与互动）、favorites（收藏）分别提供日快照。活动事件使用 `discovery.activity.v1`，契约见 `contracts/discovery-activity.schema.json`（1.1.0），摘要见相邻 `.sha256` 文件。来源接口签名及字段规则见模块说明。
 
 ```bash
 pnpm install --frozen-lockfile

@@ -16,6 +16,6 @@ const activityPath='contracts/discovery-activity.schema.json';
 const activityBytes=fs.readFileSync(activityPath);
 assert.equal(fs.readFileSync(activityPath+'.sha256','utf8'),createHash('sha256').update(activityBytes).digest('hex')+'  discovery-activity.schema.json\n');
 const activitySchema=JSON.parse(activityBytes);
-assert.equal(activitySchema['x-schema-version'],'1.0.0');
+assert.equal(activitySchema['x-schema-version'],'1.1.0');
 assert.deepEqual(activitySchema.oneOf.map(v=>[v.properties.source.const,Object.keys(v.properties.data.properties.metrics.properties)]),[['catalog',['views']],['reviews',['reviews','interactions']],['favorites',['favorites']]]);
 console.log('PASS: activity schema version, ownership and SHA-256');

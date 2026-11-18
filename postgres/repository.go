@@ -2,14 +2,22 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	s "github.com/StuHelper/stuhelper-search"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
+
+func validDBString(v string) bool {
+	return utf8.ValidString(v) && !strings.ContainsRune(v, 0)
+}
 
 //go:embed schema.sql
 var Schema string
@@ -52,6 +60,33 @@ func put(ctx context.Context, tx *sql.Tx, d s.Document, equal bool) error {
  WHERE search.documents.revision < EXCLUDED.revision OR ($5 AND search.documents.revision=EXCLUDED.revision)`, d.Target.Source, d.Target.ID, d.Revision, b, equal)
 	return e
 }
+
+// Before event types were stored, one receipt covered every event with the same
+// source and ID. Its digest was computed over the original, unnormalized event.
+func replayed(ctx context.Context, tx *sql.Tx, source, eventType, id, digest string, original any) (bool, error) {
+	var storedType, storedDigest string
+	err := tx.QueryRowContext(ctx, `SELECT event_type, digest FROM search.inbox
+ WHERE source=$1 AND id=$2 AND event_type IN ('',$3)
+ ORDER BY event_type LIMIT 1`, source, id, eventType).Scan(&storedType, &storedDigest)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, safe(err)
+	}
+	if storedType == "" {
+		raw, err := json.Marshal(original)
+		if err != nil {
+			return false, safe(err)
+		}
+		sum := sha256.Sum256(raw)
+		digest = hex.EncodeToString(sum[:])
+	}
+	if storedDigest != digest {
+		return false, s.ErrConflict
+	}
+	return true, nil
+}
 func (r *Repository) Apply(ctx context.Context, event s.Event, digest string) error {
 	tx, e := r.DB.BeginTx(ctx, nil)
 	if e != nil {
@@ -61,21 +96,13 @@ func (r *Repository) Apply(ctx context.Context, event s.Event, digest string) er
 	if e = lock(ctx, tx); e != nil {
 		return safe(e)
 	}
-	var old string
-	e = tx.QueryRowContext(ctx, "SELECT digest FROM search.inbox WHERE source=$1 AND id=$2", event.Source, event.ID).Scan(&old)
-	if e == nil {
-		if old != digest {
-			return s.ErrConflict
-		}
-		return nil
-	}
-	if !errors.Is(e, sql.ErrNoRows) {
-		return safe(e)
+	if seen, err := replayed(ctx, tx, event.Source, event.Type, event.ID, digest, event); seen || err != nil {
+		return err
 	}
 	if e = put(ctx, tx, event.Data, false); e != nil {
 		return safe(e)
 	}
-	if _, e = tx.ExecContext(ctx, "INSERT INTO search.inbox(source,id,digest) VALUES($1,$2,$3)", event.Source, event.ID, digest); e != nil {
+	if _, e = tx.ExecContext(ctx, "INSERT INTO search.inbox(source,event_type,id,digest) VALUES($1,$2,$3,$4)", event.Source, event.Type, event.ID, digest); e != nil {
 		return safe(e)
 	}
 	return safe(tx.Commit())
@@ -88,7 +115,7 @@ func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, 
 	if !ready {
 		return nil, s.ErrUnavailable
 	}
-	if f.Limit < 1 || f.Limit > 100 {
+	if f.Limit < 1 || f.Limit > 100 || !validDBString(f.Query) || !validDBString(f.After) || !validDBString(f.Kind) {
 		return nil, s.ErrInput
 	}
 	// Parameterized substring search gives literal semantics for %, _ and backslashes.
