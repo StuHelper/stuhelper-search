@@ -45,6 +45,15 @@ EXCEPTION WHEN insufficient_privilege OR undefined_file OR feature_not_supported
   NULL;
 END
 $$;
+DO $$
+BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='search.documents'::regclass AND attname='at_utc' AND NOT attisdropped) THEN
+  ALTER TABLE search.documents ADD COLUMN at_utc timestamptz;
+  UPDATE search.documents SET at_utc=(data->>'at')::timestamptz WHERE jsonb_typeof(data->'at')='string';
+ END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS search_visible_recent ON search.documents(at_utc DESC, source COLLATE "C" ASC, id COLLATE "C" ASC) WHERE (data->>'visible')::boolean AND at_utc IS NOT NULL;
+CREATE INDEX IF NOT EXISTS search_visible_at_text ON search.documents((data->>'at') DESC, source ASC, id ASC) WHERE (data->>'visible')::boolean;
 CREATE TABLE IF NOT EXISTS search.inbox (
  source text NOT NULL, id text NOT NULL, event_type text NOT NULL DEFAULT '',
  digest text NOT NULL, received_at timestamptz NOT NULL DEFAULT now(),
@@ -86,10 +95,22 @@ END $$;
 INSERT INTO search.state(id,ready) VALUES(true,false) ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS search.activities (
  source text NOT NULL CHECK(source IN ('catalog','reviews','favorites')),
- id text NOT NULL, kind text NOT NULL CHECK(kind IN ('course','teacher')),
+ id text NOT NULL, kind text NOT NULL,
  object_id text NOT NULL, day date NOT NULL, revision bigint NOT NULL CHECK(revision>0),
- data jsonb NOT NULL, PRIMARY KEY(source,id), UNIQUE(source,kind,object_id,day)
+ data jsonb NOT NULL, PRIMARY KEY(source,id), UNIQUE(source,kind,object_id,day),
+ CONSTRAINT activities_target_kind CHECK (kind IN ('course','teacher','resource'))
 );
+-- Expand accepted activity target kinds on upgrade while preserving existing rows.
+DO $$
+BEGIN
+ IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='search.activities'::regclass AND conname='activities_kind_check') THEN
+  ALTER TABLE search.activities DROP CONSTRAINT activities_kind_check;
+ END IF;
+ IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='search.activities'::regclass AND conname='activities_target_kind') THEN
+  ALTER TABLE search.activities ADD CONSTRAINT activities_target_kind CHECK (kind IN ('course','teacher','resource')) NOT VALID;
+  ALTER TABLE search.activities VALIDATE CONSTRAINT activities_target_kind;
+ END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS search_activity_window ON search.activities(kind,day);
 CREATE INDEX IF NOT EXISTS search_activities_day_key ON search.activities(day, source, id);
 CREATE INDEX IF NOT EXISTS search_activities_by_day_c ON search.activities(kind, day, source COLLATE "C", id COLLATE "C") WHERE (data->>'visible')::boolean;

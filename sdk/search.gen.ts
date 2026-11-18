@@ -173,6 +173,8 @@ export interface operations {
                 cursor?: string;
                 /** @description 单页最多返回的可见条目数，默认 20，范围 1–100。 */
                 limit?: number;
+                /** @description 排序模式：relevance 为默认稳定排序，recent 按内容公开时间降序浏览最新内容。 */
+                sort?: "relevance" | "recent";
             };
             header?: never;
             path?: never;
@@ -261,8 +263,8 @@ export interface operations {
     popular: {
         parameters: {
             query: {
-                /** @description 热门榜单目标类型（课程或教师）。 */
-                kind: "course" | "teacher";
+                /** @description 热门榜单目标类型（课程、教师或学习资料）。 */
+                kind: "course" | "teacher" | "resource";
                 /** @description 按所属学校 ID 过滤热门课程或教师。 */
                 school_id?: string;
                 /** @description 上一页响应返回的 next_cursor 续页游标；首次请求省略或传空字符串。 */

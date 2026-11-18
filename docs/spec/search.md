@@ -18,7 +18,9 @@ HTTP 请求要求登录。身份服务暂不可用或超时分别返回 503 或 
 
 搜索对查询词做 Unicode NFKC 全半角规范化，按空白拆分为最多 5 个词元做组合匹配。所有词元均须命中对象的公开检索字段；学校、课程与教师支持公开 `aliases`（如简称与拼音缩写）。
 
-非空查询按相关性分桶排序（代码或标题完全一致、标题或代码前缀匹配、标题包含、别名或曾用字段包含），同桶内按类型优先级与 `(source, id)` 字节序稳定排序；空查询保持按 `(source, id)` 排序。
+使用 `sort=recent` 时，候选按内容时间降序排列，同一时间按来源和 ID 的字节序排列。游标只能用于原排序模式。
+
+默认模式下，非空查询按相关性分桶排序（代码或标题完全一致、标题或代码前缀匹配、标题包含、别名或曾用字段包含），同桶内按类型优先级与 `(source, id)` 字节序稳定排序；空查询保持按 `(source, id)` 排序。
 
 每页默认 20 条，上限 100。游标记录已检查候选的分桶与位置，不暴露隐藏记录总量。一次最多检查 10000 条候选，搜索通过游标继续，热门排行超过上限返回暂不可用。
 
@@ -48,13 +50,15 @@ Service.Consume 接收 CloudEvents 1.0，source 为 catalog、reviews 或 resour
 
 所有检索词、游标和事件字符串均按 Unicode 码点数限长，并拒绝非法 UTF-8 与 NUL 字节。重复事件返回成功，相同标识不同载荷拒绝。低于或等于现有修订的事件只记 inbox，不改投影。删除必须保留高修订的不可见墓碑。
 
-活动使用独立事件 `discovery.activity.v1`。Schema 为 `contracts/discovery-activity.schema.json`，版本 1.1.0；相邻 `.sha256` 文件记录原始 UTF-8 文件的 SHA-256，完整检查验证摘要及字段归属。内容事件仅承载检索文档。
+活动使用独立事件 `discovery.activity.v1`。Schema 为 `contracts/discovery-activity.schema.json`，版本 1.2.0；相邻 `.sha256` 文件记录原始 UTF-8 文件的 SHA-256，完整检查验证摘要及字段归属。内容事件仅承载检索文档。
 
-活动快照保存在 search.activities，主键为 (source, id)，另以 (source, target.kind, target.id, day) 设置唯一约束。target.source 固定为 catalog，目标为一个规范课程或教师；课程活动不会自动复制到关联教师。
+活动快照保存在 search.activities，主键为 (source, id)，另以 (source, target.kind, target.id, day) 设置唯一约束。课程活动不会自动复制到关联教师。
+
+catalog 与 reviews 活动的目标为 catalog 的规范课程或教师；favorites 活动同时支持 resources 的学习资料，供 `Popular` 的 `kind=resource` 榜单汇总并经 `Sources.Current` 复核当前可见性。
 
 活动 ID 使用 `kind + "/" + base64url(UTF-8 对象 ID，无填充) + "/" + YYYY-MM-DD`，由 ActivityID 生成。事件 subject 等于活动 ID，封套 source 必须等于快照 source。不同来源可使用相同活动 ID，修订独立递增。
 
-活动目标 ID 最多 200 个 Unicode 码点。完整活动 ID 和 subject 最多 1,086 个字符，覆盖四字节码点编码后的长度。搜索与热门游标最多 2,048 字符。升级前的 inbox 回执继续按原事件表示计算摘要，并保留原来源与 ID 的去重范围。
+活动目标 ID 最多 200 个 Unicode 码点。完整活动 ID 和 subject 最多 1,087 个字符，覆盖四字节码点编码后的长度。搜索与热门游标最多 2,048 字符。升级前的 inbox 回执继续按原事件表示计算摘要，并保留原来源与 ID 的去重范围。
 
 新修订完整替换同键快照，不把重复投递当作增量相加。零计数也必须显式发送。取消收藏、撤回或删除引起计数变化时，由拥有事实的模块发布更高修订；search 不反推来源事实。
 

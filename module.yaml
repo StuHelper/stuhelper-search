@@ -32,6 +32,7 @@ scenario_tests:
     - index_collation_cursor_test.go#TestIndexOrderUnicodeCollationOpaqueCursorAndSchoolQueryRules
     - error_window_test.go#TestErrorCodeEnumRetryAfterAndPopularWindowDays
     - filter_summary_test.go#TestSummaryFieldsAndMultiDimensionalFilters
+    - resource_popular_recent_test.go#TestPopularResourcesAndRecentDiscovery
   DS-04:
     - integration_test.go#TestMyVotesHTTPAndTimeout
     - httpapi_contract_test.go#TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed
@@ -40,6 +41,7 @@ scenario_tests:
     - activity_test.go#TestHeatWeightsWindowAndTeachers
     - activity_test.go#TestActivityOwnership
     - activity_test.go#TestPopularCountsNewerLiveActivityRevisionWithoutDroppingHotTargets
+    - resource_popular_recent_test.go#TestPopularResourcesAndRecentDiscovery
   DS-06:
     - integration_test.go#TestProjectionFailureRollback
     - activity_test.go#TestActivityReplayAndRebuild

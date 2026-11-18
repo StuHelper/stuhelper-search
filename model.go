@@ -79,6 +79,7 @@ type Votes struct {
 	NextCursor string `json:"next_cursor"`
 }
 type SearchParams struct {
+	Sort      string
 	Query     string
 	Kind      string
 	SchoolID  string
@@ -94,8 +95,8 @@ type PopularParams struct {
 	Limit    int
 }
 type Filter struct {
-	Query, Kind, SchoolID, CourseID, TeacherID, After string
-	Limit                                             int
+	Query, Kind, Sort, SchoolID, CourseID, TeacherID, After string
+	Limit                                                   int
 }
 type Repository interface {
 	Apply(context.Context, Event, string) error

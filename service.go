@@ -382,6 +382,9 @@ func auth(user string) error {
 func (s *Service) Search(ctx context.Context, user, q, kind, cursor string, limit int) (Page, error) {
 	return s.SearchWithParams(ctx, user, SearchParams{Query: q, Kind: kind, Cursor: cursor, Limit: limit})
 }
+func (s *Service) SearchSort(ctx context.Context, user, q, kind, sortMode, cursor string, limit int) (Page, error) {
+	return s.SearchWithParams(ctx, user, SearchParams{Query: q, Kind: kind, Sort: sortMode, Cursor: cursor, Limit: limit})
+}
 func (s *Service) SearchWithParams(ctx context.Context, user string, p SearchParams) (Page, error) {
 	q := strings.TrimSpace(p.Query)
 	start := time.Now()
@@ -391,7 +394,7 @@ func (s *Service) SearchWithParams(ctx context.Context, user string, p SearchPar
 		s.observe("search", "", "unauthenticated", start, 0, 0)
 		return out, e
 	}
-	if !validFilterID(p.SchoolID) || !validFilterID(p.CourseID) || !validFilterID(p.TeacherID) || !searchText(q, 200) || limit < 1 || limit > 100 || kind != "" && kind != "school" && kind != "course" && kind != "teacher" && kind != "review" && kind != "resource" {
+	if (p.Sort != "" && p.Sort != "relevance" && p.Sort != "recent") || !validFilterID(p.SchoolID) || !validFilterID(p.CourseID) || !validFilterID(p.TeacherID) || !searchText(q, 200) || limit < 1 || limit > 100 || kind != "" && kind != "school" && kind != "course" && kind != "teacher" && kind != "review" && kind != "resource" {
 		s.observe("search", "", "invalid_input", start, 0, 0)
 		return out, ErrInput
 	}
@@ -399,12 +402,20 @@ func (s *Service) SearchWithParams(ctx context.Context, user string, p SearchPar
 	softBudget := s.config.QueryTimeout * 3 / 4
 	ctx, cancel := context.WithTimeout(ctx, s.config.QueryTimeout)
 	defer cancel()
-	after, e := s.openCursor(ctx, "search", user, cursor)
+	scope := "search"
+	if p.Sort == "recent" {
+		scope = "search.recent"
+	}
+	after, e := s.openCursor(ctx, scope, user, cursor)
 	if e != nil {
 		s.observe("search", "", "invalid_input", start, 0, 0)
 		return out, e
 	}
-	if after != "" {
+	if p.Sort == "recent" {
+		if _, _, _, _, err := ParseRecentAfter(after); err != nil {
+			return out, err
+		}
+	} else if after != "" {
 		if normQ != "" && !strings.Contains(strings.SplitN(after, "/", 2)[0], ":") {
 			return out, ErrInput
 		}
@@ -414,7 +425,7 @@ func (s *Service) SearchWithParams(ctx context.Context, user string, p SearchPar
 	}
 	scanned, skips := 0, 0
 	continuation := func() (Page, error) {
-		next, err := s.sealCursor(ctx, "search", user, after)
+		next, err := s.sealCursor(ctx, scope, user, after)
 		s.observe("search", "", errorCode(err, "storage_unavailable"), start, scanned, skips)
 		if err != nil {
 			return Page{}, err
@@ -427,7 +438,7 @@ func (s *Service) SearchWithParams(ctx context.Context, user string, p SearchPar
 		if scanned > 0 && time.Since(start) >= softBudget {
 			return continuation()
 		}
-		docs, e := s.repo.Candidates(ctx, Filter{Query: normQ, Kind: kind, SchoolID: p.SchoolID, CourseID: p.CourseID, TeacherID: p.TeacherID, After: after, Limit: 100})
+		docs, e := s.repo.Candidates(ctx, Filter{Sort: p.Sort, Query: normQ, Kind: kind, SchoolID: p.SchoolID, CourseID: p.CourseID, TeacherID: p.TeacherID, After: after, Limit: 100})
 		if e != nil {
 			s.observe("search", "", errorCode(e, "storage_unavailable"), start, scanned, skips)
 			return out, e
@@ -437,7 +448,11 @@ func (s *Service) SearchWithParams(ctx context.Context, user string, p SearchPar
 				return continuation()
 			}
 			scanned++
-			after = SearchAfterToken(d, normQ, terms)
+			if p.Sort == "recent" {
+				after = RecentAfterToken(d)
+			} else {
+				after = SearchAfterToken(d, normQ, terms)
+			}
 			live, ok, skippedRev, errCategory, e := s.current(ctx, user, d)
 			if e != nil {
 				s.observe("search", d.Target.Source, errorCode(e, errCategory), start, scanned, skips)
@@ -550,7 +565,7 @@ func (s *Service) PopularWithParams(ctx context.Context, user string, p PopularP
 		s.observe("popular", "", "unauthenticated", start, 0, 0)
 		return out, e
 	}
-	if !validFilterID(p.SchoolID) || limit < 1 || limit > 100 || (kind != "course" && kind != "teacher") {
+	if !validFilterID(p.SchoolID) || limit < 1 || limit > 100 || (kind != "course" && kind != "teacher" && kind != "resource") {
 		s.observe("popular", "", "invalid_input", start, 0, 0)
 		return out, ErrInput
 	}
@@ -905,4 +920,31 @@ func ParseSearchAfter(after string, hasQuery bool) (int, int, string, string, bo
 		return 0, 0, "", "", false, ErrInput
 	}
 	return bucket, kr, src, id, true, nil
+}
+
+func RecentAfterToken(d Document) string {
+	return fmt.Sprintf("recent:%d:%s/%s", d.At.UTC().UnixMicro(), d.Target.Source, d.Target.ID)
+}
+
+func ParseRecentAfter(after string) (time.Time, string, string, bool, error) {
+	if after == "" {
+		return time.Time{}, "", "", false, nil
+	}
+	if !strings.HasPrefix(after, "recent:") || !utf8.ValidString(after) || strings.ContainsRune(after, 0) {
+		return time.Time{}, "", "", false, ErrInput
+	}
+	rest := strings.TrimPrefix(after, "recent:")
+	microPart, keyPart, ok := strings.Cut(rest, ":")
+	if !ok {
+		return time.Time{}, "", "", false, ErrInput
+	}
+	micros, err := strconv.ParseInt(microPart, 10, 64)
+	if err != nil {
+		return time.Time{}, "", "", false, ErrInput
+	}
+	src, id, ok := strings.Cut(keyPart, "/")
+	if !ok || (src != "catalog" && src != "reviews" && src != "resources") || !searchText(id, 200) || id == "" {
+		return time.Time{}, "", "", false, ErrInput
+	}
+	return time.UnixMicro(micros).UTC(), src, id, true, nil
 }

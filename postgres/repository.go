@@ -96,9 +96,9 @@ func put(ctx context.Context, tx *sql.Tx, d s.Document, equal bool) error {
 	if e != nil {
 		return e
 	}
-	_, e = tx.ExecContext(ctx, `INSERT INTO search.documents(source,id,revision,data) VALUES($1,$2,$3,$4)
- ON CONFLICT(source,id) DO UPDATE SET revision=EXCLUDED.revision,data=EXCLUDED.data
- WHERE search.documents.revision < EXCLUDED.revision OR ($5 AND search.documents.revision=EXCLUDED.revision)`, d.Target.Source, d.Target.ID, d.Revision, b, equal)
+	_, e = tx.ExecContext(ctx, `INSERT INTO search.documents(source,id,revision,at_utc,data) VALUES($1,$2,$3,$4,$5)
+ ON CONFLICT(source,id) DO UPDATE SET revision=EXCLUDED.revision,at_utc=EXCLUDED.at_utc,data=EXCLUDED.data
+ WHERE search.documents.revision < EXCLUDED.revision OR ($6 AND search.documents.revision=EXCLUDED.revision)`, d.Target.Source, d.Target.ID, d.Revision, d.At.UTC(), b, equal)
 	return e
 }
 
@@ -156,31 +156,47 @@ func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, 
 	if !ready {
 		return nil, s.ErrIndexBuilding
 	}
-	if f.Limit < 1 || f.Limit > 100 || !validDBString(f.Query) || !validDBString(f.After) || !validDBString(f.Kind) || !validDBString(f.SchoolID) || !validDBString(f.CourseID) || !validDBString(f.TeacherID) {
+	if (f.Sort != "" && f.Sort != "relevance" && f.Sort != "recent") || f.Limit < 1 || f.Limit > 100 || !validDBString(f.Query) || !validDBString(f.After) || !validDBString(f.Kind) || !validDBString(f.SchoolID) || !validDBString(f.CourseID) || !validDBString(f.TeacherID) {
 		return nil, s.ErrInput
 	}
 	normQ, terms := s.NormalizeQuery(f.Query)
 	if terms == nil {
 		terms = []string{}
 	}
-	afterBucket, afterKindRank, afterSource, afterID, hasCursor, e := s.ParseSearchAfter(f.After, normQ != "")
+	var afterBucket, afterKindRank int
+	var afterSource, afterID string
+	var afterAt time.Time
+	var hasCursor bool
+	var e error
+	if f.Sort == "recent" {
+		afterAt, afterSource, afterID, hasCursor, e = s.ParseRecentAfter(f.After)
+	} else {
+		afterBucket, afterKindRank, afterSource, afterID, hasCursor, e = s.ParseSearchAfter(f.After, normQ != "")
+	}
 	if e != nil {
 		return nil, e
 	}
 	// Parameterized substring search gives literal semantics for %, _ and backslashes.
 	var rows *sql.Rows
-	if normQ == "" {
+	if normQ == "" && f.Sort == "recent" {
+		rows, e = r.DB.QueryContext(ctx, `SELECT data || jsonb_build_object('at',at_utc) FROM search.documents
+ WHERE (data->>'visible')::boolean AND at_utc IS NOT NULL
+ AND (NOT $1 OR at_utc < $2 OR (at_utc=$2 AND (source COLLATE "C",id COLLATE "C")>($3 COLLATE "C",$4 COLLATE "C")))
+ AND ($5='' OR data->'target'->>'kind'=$5) AND ($6='' OR data->>'school_id'=$6)
+ AND ($7='' OR data->>'course_id'=$7) AND ($8='' OR jsonb_exists(COALESCE(NULLIF(data->'teacher_ids','null'::jsonb),'[]'::jsonb),$8))
+ ORDER BY at_utc DESC,source COLLATE "C",id COLLATE "C" LIMIT $9`, hasCursor, afterAt, afterSource, afterID, f.Kind, f.SchoolID, f.CourseID, f.TeacherID, f.Limit)
+	} else if normQ == "" {
 		rows, e = r.DB.QueryContext(ctx, `SELECT data FROM search.documents
  WHERE (data->>'visible')::boolean AND (source COLLATE "C",id COLLATE "C") > ($1 COLLATE "C",$2 COLLATE "C")
  AND ($3='' OR data->'target'->>'kind'=$3) AND ($4='' OR data->>'school_id'=$4)
  AND ($5='' OR data->>'course_id'=$5) AND ($6='' OR jsonb_exists(COALESCE(NULLIF(data->'teacher_ids','null'::jsonb),'[]'::jsonb),$6))
  ORDER BY source COLLATE "C",id COLLATE "C" LIMIT $7`, afterSource, afterID, f.Kind, f.SchoolID, f.CourseID, f.TeacherID, f.Limit)
 	} else {
-		rows, e = r.DB.QueryContext(ctx, `WITH base AS (
+		const matching = `WITH base AS (
   SELECT
     source,
     id,
-    data,
+    data, at_utc,
     data->'target'->>'kind' AS kind,
     normalize(COALESCE(data->>'code', ''), NFKC) AS norm_code,
     lower(normalize(COALESCE(data->>'title', ''), NFKC) COLLATE "pg_c_utf8") AS l_title,
@@ -190,15 +206,15 @@ func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, 
   FROM search.documents
   WHERE (data->>'visible')::boolean
     AND ($3 = '' OR data->'target'->>'kind' = $3)
-    AND ($10='' OR data->>'school_id'=$10)
-    AND ($11='' OR data->>'course_id'=$11)
-    AND ($12='' OR jsonb_exists(COALESCE(NULLIF(data->'teacher_ids','null'::jsonb),'[]'::jsonb),$12))
+    AND ($4='' OR data->>'school_id'=$4)
+    AND ($5='' OR data->>'course_id'=$5)
+    AND ($6='' OR jsonb_exists(COALESCE(NULLIF(data->'teacher_ids','null'::jsonb),'[]'::jsonb),$6))
 ),
 matched AS (
   SELECT
     source,
     id,
-    data,
+    data, at_utc,
     CASE
       WHEN $1 = '' THEN 0
       WHEN (kind = 'school' AND $1 ~ '^[0-9]+$' AND (
@@ -268,10 +284,16 @@ matched AS (
     )
   )
 )
-SELECT data FROM matched
-WHERE (NOT $4 OR (bucket, kind_rank, source COLLATE "C", id COLLATE "C") > ($5, $6, $7 COLLATE "C", $8 COLLATE "C"))
+`
+		args := []any{normQ, terms, f.Kind, f.SchoolID, f.CourseID, f.TeacherID, hasCursor}
+		if f.Sort == "recent" {
+			rows, e = r.DB.QueryContext(ctx, matching+`SELECT data || jsonb_build_object('at',at_utc) FROM matched WHERE at_utc IS NOT NULL AND (NOT $7 OR at_utc < $8 OR (at_utc=$8 AND (source COLLATE "C",id COLLATE "C")>($9 COLLATE "C",$10 COLLATE "C"))) ORDER BY at_utc DESC,source COLLATE "C",id COLLATE "C" LIMIT $11`, append(args, afterAt, afterSource, afterID, f.Limit)...)
+		} else {
+			rows, e = r.DB.QueryContext(ctx, matching+`SELECT data FROM matched
+WHERE (NOT $7 OR (bucket, kind_rank, source COLLATE "C", id COLLATE "C") > ($8, $9, $10 COLLATE "C", $11 COLLATE "C"))
 ORDER BY bucket ASC, kind_rank ASC, source COLLATE "C" ASC, id COLLATE "C" ASC
-LIMIT $9`, normQ, terms, f.Kind, hasCursor, afterBucket, afterKindRank, afterSource, afterID, f.Limit, f.SchoolID, f.CourseID, f.TeacherID)
+LIMIT $12`, append(args, afterBucket, afterKindRank, afterSource, afterID, f.Limit)...)
+		}
 	}
 	if e != nil {
 		return nil, safe(e)
@@ -327,10 +349,10 @@ func putDocumentBatch(ctx context.Context, tx *sql.Tx, docs []s.Document) error 
 	if stale {
 		return s.ErrConflict
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO search.documents(source,id,revision,data)
-		SELECT src, id, rev, payload::jsonb
+	_, err := tx.ExecContext(ctx, `INSERT INTO search.documents(source,id,revision,data,at_utc)
+		SELECT src, id, rev, payload::jsonb, (payload::jsonb->>'at')::timestamptz
 		FROM UNNEST($1::text[], $2::text[], $3::bigint[], $4::text[]) AS inc(src, id, rev, payload)
-		ON CONFLICT (source,id) DO UPDATE SET revision=EXCLUDED.revision, data=EXCLUDED.data
+		ON CONFLICT (source,id) DO UPDATE SET revision=EXCLUDED.revision, data=EXCLUDED.data, at_utc=EXCLUDED.at_utc
 		WHERE search.documents.revision <= EXCLUDED.revision`, sources, ids, revisions, payloads)
 	return err
 }
