@@ -426,7 +426,7 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 			if ValidateActivity(live) != nil || live.Source != d.Source || live.ID != d.ID || live.Target != d.Target || live.Day != d.Day {
 				return out, ErrUnavailable
 			}
-			if !live.Visible || live.Revision != d.Revision {
+			if !live.Visible || live.Revision < d.Revision {
 				continue
 			}
 			v := scores[d.Target]

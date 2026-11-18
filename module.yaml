@@ -35,6 +35,7 @@ scenario_tests:
   DS-05:
     - activity_test.go#TestHeatWeightsWindowAndTeachers
     - activity_test.go#TestActivityOwnership
+    - activity_test.go#TestPopularCountsNewerLiveActivityRevisionWithoutDroppingHotTargets
   DS-06:
     - integration_test.go#TestProjectionFailureRollback
     - activity_test.go#TestActivityReplayAndRebuild
