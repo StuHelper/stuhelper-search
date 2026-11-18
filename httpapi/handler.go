@@ -6,7 +6,9 @@ import (
 	"errors"
 	s "github.com/StuHelper/stuhelper-search"
 	"net/http"
+	neturl "net/url"
 	"strconv"
+	"strings"
 )
 
 type Handler struct {
@@ -14,34 +16,59 @@ type Handler struct {
 	Authenticate func(*http.Request) (string, error)
 }
 
+var routeParams = map[string]map[string]bool{
+	"/api/v1/search":          {"q": true, "kind": true, "cursor": true, "limit": true},
+	"/api/v1/search/popular":  {"kind": true, "cursor": true, "limit": true},
+	"/api/v1/search/my-votes": {"cursor": true, "limit": true},
+}
+
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if h.Service == nil || h.Authenticate == nil {
-		fail(w, s.ErrUnavailable)
+		fail(w, r, s.ErrUnavailable)
 		return
 	}
 	user, e := h.Authenticate(r)
-	if e != nil || user == "" {
-		fail(w, s.ErrUnauthenticated)
+	if e != nil {
+		if isAuthDependencyFailure(e) {
+			fail(w, r, e)
+			return
+		}
+		fail(w, r, s.ErrUnauthenticated)
+		return
+	}
+	if user == "" {
+		fail(w, r, s.ErrUnauthenticated)
+		return
+	}
+	allowed, knownRoute := routeParams[r.URL.Path]
+	if !knownRoute {
+		fail(w, r, s.ErrNotFound)
 		return
 	}
 	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
 		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(map[string]string{"code": "method_not_allowed"})
 		return
 	}
-	q := r.URL.Query()
-	for _, v := range q {
-		if len(v) != 1 {
-			fail(w, s.ErrInput)
+	q, e := neturl.ParseQuery(r.URL.RawQuery)
+	if e != nil {
+		fail(w, r, s.ErrInput)
+		return
+	}
+	for k, v := range q {
+		if !allowed[k] || len(v) != 1 {
+			fail(w, r, s.ErrInput)
 			return
 		}
 	}
 	limit := 20
-	if q.Has("limit") {
+	if _, ok := q["limit"]; ok {
 		limit, e = strconv.Atoi(q.Get("limit"))
 		if e != nil {
-			fail(w, s.ErrInput)
+			fail(w, r, s.ErrInput)
 			return
 		}
 	}
@@ -53,32 +80,41 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		out, e = h.Service.Popular(r.Context(), user, q.Get("kind"), q.Get("cursor"), limit)
 	case "/api/v1/search/my-votes":
 		out, e = h.Service.MyVotes(r.Context(), user, q.Get("cursor"), limit)
-	default:
-		e = s.ErrNotFound
 	}
 	if e != nil {
-		fail(w, e)
+		fail(w, r, e)
 		return
 	}
-	if e = json.NewEncoder(w).Encode(out); e != nil {
-		return
-	}
+	_ = json.NewEncoder(w).Encode(out)
 }
-func fail(w http.ResponseWriter, e error) {
-	code := 503
+
+func isAuthDependencyFailure(e error) bool {
+	if errors.Is(e, s.ErrUnavailable) || errors.Is(e, context.DeadlineExceeded) || errors.Is(e, context.Canceled) {
+		return true
+	}
+	// Preserve platform transport.ErrUnavailable ("authorization unavailable") without coupling packages.
+	return strings.Contains(strings.ToLower(e.Error()), "unavailable")
+}
+
+func fail(w http.ResponseWriter, r *http.Request, e error) {
+	code := http.StatusServiceUnavailable
 	name := "unavailable"
 	switch {
 	case errors.Is(e, s.ErrInput):
-		code = 400
+		code = http.StatusBadRequest
 		name = "invalid_input"
 	case errors.Is(e, s.ErrUnauthenticated):
-		code = 401
+		code = http.StatusUnauthorized
 		name = "unauthenticated"
 	case errors.Is(e, s.ErrNotFound):
-		code = 404
+		code = http.StatusNotFound
 		name = "not_found"
-	case errors.Is(e, context.DeadlineExceeded), errors.Is(e, context.Canceled):
-		code = 504
+	case errors.Is(e, context.Canceled) && r != nil && errors.Is(r.Context().Err(), context.Canceled):
+		// Client aborted the in-flight request (e.g. AbortController); avoid polluting 5xx metrics.
+		code = 499
+		name = "cancelled"
+	case errors.Is(e, context.DeadlineExceeded) && (r == nil || !errors.Is(r.Context().Err(), context.Canceled)):
+		code = http.StatusGatewayTimeout
 		name = "timeout"
 	}
 	w.WriteHeader(code)
