@@ -17,7 +17,7 @@ type Handler struct {
 }
 
 var routeParams = map[string]map[string]bool{
-	"/api/v1/search":          {"q": true, "school_id": true, "course_id": true, "teacher_id": true, "kind": true, "cursor": true, "limit": true},
+	"/api/v1/search":          {"sort": true, "q": true, "school_id": true, "course_id": true, "teacher_id": true, "kind": true, "cursor": true, "limit": true},
 	"/api/v1/search/popular":  {"school_id": true, "kind": true, "cursor": true, "limit": true},
 	"/api/v1/search/my-votes": {"cursor": true, "limit": true},
 }
@@ -76,6 +76,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/api/v1/search":
 		out, e = h.Service.SearchWithParams(r.Context(), user, s.SearchParams{
+			Sort:      q.Get("sort"),
 			Query:     q.Get("q"),
 			Kind:      q.Get("kind"),
 			SchoolID:  q.Get("school_id"),

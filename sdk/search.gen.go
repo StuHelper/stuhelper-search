@@ -145,16 +145,37 @@ func (e SearchParamsKind) Valid() bool {
 	}
 }
 
+// Defines values for SearchParamsSort.
+const (
+	Recent    SearchParamsSort = "recent"
+	Relevance SearchParamsSort = "relevance"
+)
+
+// Valid indicates whether the value is a known member of the SearchParamsSort enum.
+func (e SearchParamsSort) Valid() bool {
+	switch e {
+	case Recent:
+		return true
+	case Relevance:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PopularParamsKind.
 const (
-	PopularParamsKindCourse  PopularParamsKind = "course"
-	PopularParamsKindTeacher PopularParamsKind = "teacher"
+	PopularParamsKindCourse   PopularParamsKind = "course"
+	PopularParamsKindResource PopularParamsKind = "resource"
+	PopularParamsKindTeacher  PopularParamsKind = "teacher"
 )
 
 // Valid indicates whether the value is a known member of the PopularParamsKind enum.
 func (e PopularParamsKind) Valid() bool {
 	switch e {
 	case PopularParamsKindCourse:
+		return true
+	case PopularParamsKindResource:
 		return true
 	case PopularParamsKindTeacher:
 		return true
@@ -287,10 +308,16 @@ type SearchParams struct {
 
 	// Limit 单页最多返回的可见条目数，默认 20，范围 1–100。
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Sort 排序模式：relevance 为默认稳定排序，recent 按内容公开时间降序浏览最新内容。
+	Sort *SearchParamsSort `form:"sort,omitempty" json:"sort,omitempty"`
 }
 
 // SearchParamsKind defines parameters for Search.
 type SearchParamsKind string
+
+// SearchParamsSort defines parameters for Search.
+type SearchParamsSort string
 
 // MyVotesParams defines parameters for MyVotes.
 type MyVotesParams struct {
@@ -303,7 +330,7 @@ type MyVotesParams struct {
 
 // PopularParams defines parameters for Popular.
 type PopularParams struct {
-	// Kind 热门榜单目标类型（课程或教师）。
+	// Kind 热门榜单目标类型（课程、教师或学习资料）。
 	Kind PopularParamsKind `form:"kind" json:"kind"`
 
 	// SchoolId 按所属学校 ID 过滤热门课程或教师。
@@ -569,6 +596,18 @@ func NewSearchRequest(server string, params *SearchParams) (*http.Request, error
 		if params.Limit != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Sort != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "sort", *params.Sort, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {

@@ -88,6 +88,20 @@
               "maximum": 100,
               "default": 20
             }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "排序模式：relevance 为默认稳定排序，recent 按内容公开时间降序浏览最新内容。",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "relevance",
+                "recent"
+              ],
+              "default": "relevance"
+            }
           }
         ],
         "responses": {
@@ -205,12 +219,13 @@
             "name": "kind",
             "in": "query",
             "required": true,
-            "description": "热门榜单目标类型（课程或教师）。",
+            "description": "热门榜单目标类型（课程、教师或学习资料）。",
             "schema": {
               "type": "string",
               "enum": [
                 "course",
-                "teacher"
+                "teacher",
+                "resource"
               ]
             }
           },
