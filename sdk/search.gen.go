@@ -15,6 +15,39 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for ErrorCode.
+const (
+	Cancelled        ErrorCode = "cancelled"
+	InvalidInput     ErrorCode = "invalid_input"
+	MethodNotAllowed ErrorCode = "method_not_allowed"
+	NotFound         ErrorCode = "not_found"
+	Timeout          ErrorCode = "timeout"
+	Unauthenticated  ErrorCode = "unauthenticated"
+	Unavailable      ErrorCode = "unavailable"
+)
+
+// Valid indicates whether the value is a known member of the ErrorCode enum.
+func (e ErrorCode) Valid() bool {
+	switch e {
+	case Cancelled:
+		return true
+	case InvalidInput:
+		return true
+	case MethodNotAllowed:
+		return true
+	case NotFound:
+		return true
+	case Timeout:
+		return true
+	case Unauthenticated:
+		return true
+	case Unavailable:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TargetKind.
 const (
 	TargetKindCourse   TargetKind = "course"
@@ -128,8 +161,11 @@ func (e PopularParamsKind) Valid() bool {
 
 // Error defines model for Error.
 type Error struct {
-	Code string `json:"code"`
+	Code ErrorCode `json:"code"`
 }
+
+// ErrorCode defines model for Error.Code.
+type ErrorCode string
 
 // Item defines model for Item.
 type Item struct {
@@ -151,7 +187,10 @@ type Item struct {
 
 // Page defines model for Page.
 type Page struct {
-	Items      []Item `json:"items"`
+	// Items 本页经当前权限与可见性过滤后的结果；过滤隐藏候选或触达扫描上限后，条数可能少于 limit 甚至为空数组。
+	Items []Item `json:"items"`
+
+	// NextCursor 下一页续读游标；仅当为空字符串时表示分页结束，不能以 items 长度小于 limit 判断结束。
 	NextCursor string `json:"next_cursor"`
 }
 
@@ -179,7 +218,10 @@ type VoteChoice string
 
 // Votes defines model for Votes.
 type Votes struct {
-	Items      []Vote `json:"items"`
+	// Items 本页当前仍可见的有效投票；已撤回或无权限的目标过滤后条数可能少于 limit。
+	Items []Vote `json:"items"`
+
+	// NextCursor 下一页续读游标；仅当为空字符串时表示分页结束。
 	NextCursor string `json:"next_cursor"`
 }
 
@@ -191,7 +233,7 @@ type SearchParams struct {
 	// Kind kind
 	Kind *SearchParamsKind `form:"kind,omitempty" json:"kind,omitempty"`
 
-	// Cursor cursor
+	// Cursor 上一页返回的 next_cursor 续页游标；首次请求省略或传空字符串。
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 
 	// Limit limit
@@ -203,7 +245,7 @@ type SearchParamsKind string
 
 // MyVotesParams defines parameters for MyVotes.
 type MyVotesParams struct {
-	// Cursor cursor
+	// Cursor 上一页返回的 next_cursor 续页游标；首次请求省略或传空字符串。
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 
 	// Limit limit
@@ -215,7 +257,7 @@ type PopularParams struct {
 	// Kind kind
 	Kind PopularParamsKind `form:"kind" json:"kind"`
 
-	// Cursor cursor
+	// Cursor 上一页返回的 next_cursor 续页游标；首次请求省略或传空字符串。
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 
 	// Limit limit
@@ -662,6 +704,11 @@ type ClientWithResponsesInterface interface {
 	PopularWithResponse(ctx context.Context, params *PopularParams, reqEditors ...RequestEditorFn) (*PopularResponse, error)
 }
 
+// SearchResponse405Headers the declared response headers of an HTTP 405 response for Search
+type SearchResponse405Headers struct {
+	Allow *string
+}
+
 type SearchResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -673,10 +720,14 @@ type SearchResponse struct {
 	JSON401 *Error
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *Error
+	// JSON405 the response for an HTTP 405 `application/json` response
+	JSON405 *Error
 	// JSON503 the response for an HTTP 503 `application/json` response
 	JSON503 *Error
 	// JSON504 the response for an HTTP 504 `application/json` response
 	JSON504 *Error
+	// Headers405 the parsed response headers for an HTTP 405 response
+	Headers405 *SearchResponse405Headers
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
@@ -697,6 +748,11 @@ func (r SearchResponse) GetJSON401() *Error {
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
 func (r SearchResponse) GetJSON404() *Error {
 	return r.JSON404
+}
+
+// GetJSON405 returns the response for an HTTP 405 `application/json` response
+func (r SearchResponse) GetJSON405() *Error {
+	return r.JSON405
 }
 
 // GetJSON503 returns the response for an HTTP 503 `application/json` response
@@ -738,6 +794,11 @@ func (r SearchResponse) ContentType() string {
 	return ""
 }
 
+// MyVotesResponse405Headers the declared response headers of an HTTP 405 response for MyVotes
+type MyVotesResponse405Headers struct {
+	Allow *string
+}
+
 type MyVotesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -749,10 +810,14 @@ type MyVotesResponse struct {
 	JSON401 *Error
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *Error
+	// JSON405 the response for an HTTP 405 `application/json` response
+	JSON405 *Error
 	// JSON503 the response for an HTTP 503 `application/json` response
 	JSON503 *Error
 	// JSON504 the response for an HTTP 504 `application/json` response
 	JSON504 *Error
+	// Headers405 the parsed response headers for an HTTP 405 response
+	Headers405 *MyVotesResponse405Headers
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
@@ -773,6 +838,11 @@ func (r MyVotesResponse) GetJSON401() *Error {
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
 func (r MyVotesResponse) GetJSON404() *Error {
 	return r.JSON404
+}
+
+// GetJSON405 returns the response for an HTTP 405 `application/json` response
+func (r MyVotesResponse) GetJSON405() *Error {
+	return r.JSON405
 }
 
 // GetJSON503 returns the response for an HTTP 503 `application/json` response
@@ -814,6 +884,11 @@ func (r MyVotesResponse) ContentType() string {
 	return ""
 }
 
+// PopularResponse405Headers the declared response headers of an HTTP 405 response for Popular
+type PopularResponse405Headers struct {
+	Allow *string
+}
+
 type PopularResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -825,10 +900,14 @@ type PopularResponse struct {
 	JSON401 *Error
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *Error
+	// JSON405 the response for an HTTP 405 `application/json` response
+	JSON405 *Error
 	// JSON503 the response for an HTTP 503 `application/json` response
 	JSON503 *Error
 	// JSON504 the response for an HTTP 504 `application/json` response
 	JSON504 *Error
+	// Headers405 the parsed response headers for an HTTP 405 response
+	Headers405 *PopularResponse405Headers
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
@@ -849,6 +928,11 @@ func (r PopularResponse) GetJSON401() *Error {
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
 func (r PopularResponse) GetJSON404() *Error {
 	return r.JSON404
+}
+
+// GetJSON405 returns the response for an HTTP 405 `application/json` response
+func (r PopularResponse) GetJSON405() *Error {
+	return r.JSON405
 }
 
 // GetJSON503 returns the response for an HTTP 503 `application/json` response
@@ -973,6 +1057,13 @@ func ParseSearchResponse(rsp *http.Response) (*SearchResponse, error) {
 		}
 		response.JSON404 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 405:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON405 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -987,6 +1078,19 @@ func ParseSearchResponse(rsp *http.Response) (*SearchResponse, error) {
 		}
 		response.JSON504 = &dest
 
+	}
+
+	switch {
+	case rsp.StatusCode == 405:
+		var headers SearchResponse405Headers
+		if values := rsp.Header.Values("Allow"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Allow", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Allow = &value
+		}
+		response.Headers405 = &headers
 	}
 
 	return response, nil
@@ -1034,6 +1138,13 @@ func ParseMyVotesResponse(rsp *http.Response) (*MyVotesResponse, error) {
 		}
 		response.JSON404 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 405:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON405 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -1048,6 +1159,19 @@ func ParseMyVotesResponse(rsp *http.Response) (*MyVotesResponse, error) {
 		}
 		response.JSON504 = &dest
 
+	}
+
+	switch {
+	case rsp.StatusCode == 405:
+		var headers MyVotesResponse405Headers
+		if values := rsp.Header.Values("Allow"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Allow", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Allow = &value
+		}
+		response.Headers405 = &headers
 	}
 
 	return response, nil
@@ -1095,6 +1219,13 @@ func ParsePopularResponse(rsp *http.Response) (*PopularResponse, error) {
 		}
 		response.JSON404 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 405:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON405 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -1109,6 +1240,19 @@ func ParsePopularResponse(rsp *http.Response) (*PopularResponse, error) {
 		}
 		response.JSON504 = &dest
 
+	}
+
+	switch {
+	case rsp.StatusCode == 405:
+		var headers PopularResponse405Headers
+		if values := rsp.Header.Values("Allow"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Allow", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Allow = &value
+		}
+		response.Headers405 = &headers
 	}
 
 	return response, nil

@@ -81,7 +81,10 @@ func (r *Repository) Apply(ctx context.Context, event s.Event, digest string) er
 }
 func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, error) {
 	var ready bool
-	if e := r.DB.QueryRowContext(ctx, "SELECT ready FROM search.state WHERE id").Scan(&ready); e != nil || !ready {
+	if e := r.DB.QueryRowContext(ctx, "SELECT ready FROM search.state WHERE id").Scan(&ready); e != nil {
+		return nil, safe(e)
+	}
+	if !ready {
 		return nil, s.ErrUnavailable
 	}
 	if f.Limit < 1 || f.Limit > 100 {

@@ -83,7 +83,9 @@ export interface components {
             code?: string;
         };
         Page: {
+            /** @description 本页经当前权限与可见性过滤后的结果；过滤隐藏候选或触达扫描上限后，条数可能少于 limit 甚至为空数组。 */
             items: components["schemas"]["Item"][];
+            /** @description 下一页续读游标；仅当为空字符串时表示分页结束，不能以 items 长度小于 limit 判断结束。 */
             next_cursor: string;
         };
         Vote: {
@@ -92,11 +94,14 @@ export interface components {
             choice: "up" | "down";
         };
         Votes: {
+            /** @description 本页当前仍可见的有效投票；已撤回或无权限的目标过滤后条数可能少于 limit。 */
             items: components["schemas"]["Vote"][];
+            /** @description 下一页续读游标；仅当为空字符串时表示分页结束。 */
             next_cursor: string;
         };
         Error: {
-            code: string;
+            /** @enum {string} */
+            code: "invalid_input" | "unauthenticated" | "not_found" | "method_not_allowed" | "unavailable" | "timeout" | "cancelled";
         };
     };
     responses: never;
@@ -114,7 +119,7 @@ export interface operations {
                 q?: string;
                 /** @description kind */
                 kind?: "school" | "course" | "teacher" | "review" | "resource";
-                /** @description cursor */
+                /** @description 上一页返回的 next_cursor 续页游标；首次请求省略或传空字符串。 */
                 cursor?: string;
                 /** @description limit */
                 limit?: number;
@@ -161,6 +166,17 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description method_not_allowed */
+            405: {
+                headers: {
+                    /** @description 允许的 HTTP 方法列表（GET）。 */
+                    Allow?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description unavailable */
             503: {
                 headers: {
@@ -186,7 +202,7 @@ export interface operations {
             query: {
                 /** @description kind */
                 kind: "course" | "teacher";
-                /** @description cursor */
+                /** @description 上一页返回的 next_cursor 续页游标；首次请求省略或传空字符串。 */
                 cursor?: string;
                 /** @description limit */
                 limit?: number;
@@ -233,6 +249,17 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description method_not_allowed */
+            405: {
+                headers: {
+                    /** @description 允许的 HTTP 方法列表（GET）。 */
+                    Allow?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description unavailable */
             503: {
                 headers: {
@@ -256,7 +283,7 @@ export interface operations {
     myVotes: {
         parameters: {
             query?: {
-                /** @description cursor */
+                /** @description 上一页返回的 next_cursor 续页游标；首次请求省略或传空字符串。 */
                 cursor?: string;
                 /** @description limit */
                 limit?: number;
@@ -297,6 +324,17 @@ export interface operations {
             /** @description not_found */
             404: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description method_not_allowed */
+            405: {
+                headers: {
+                    /** @description 允许的 HTTP 方法列表（GET）。 */
+                    Allow?: string;
                     [name: string]: unknown;
                 };
                 content: {

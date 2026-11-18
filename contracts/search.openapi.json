@@ -40,9 +40,10 @@
             "name": "cursor",
             "in": "query",
             "required": false,
-            "description": "cursor",
+            "description": "上一页返回的 next_cursor 续页游标；首次请求省略或传空字符串。",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 1024
             }
           },
           {
@@ -91,6 +92,24 @@
           },
           "404": {
             "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "method_not_allowed",
+            "headers": {
+              "Allow": {
+                "description": "允许的 HTTP 方法列表（GET）。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -150,9 +169,10 @@
             "name": "cursor",
             "in": "query",
             "required": false,
-            "description": "cursor",
+            "description": "上一页返回的 next_cursor 续页游标；首次请求省略或传空字符串。",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 1024
             }
           },
           {
@@ -209,6 +229,24 @@
               }
             }
           },
+          "405": {
+            "description": "method_not_allowed",
+            "headers": {
+              "Allow": {
+                "description": "允许的 HTTP 方法列表（GET）。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "503": {
             "description": "unavailable",
             "content": {
@@ -246,9 +284,10 @@
             "name": "cursor",
             "in": "query",
             "required": false,
-            "description": "cursor",
+            "description": "上一页返回的 next_cursor 续页游标；首次请求省略或传空字符串。",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 1024
             }
           },
           {
@@ -297,6 +336,24 @@
           },
           "404": {
             "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "method_not_allowed",
+            "headers": {
+              "Allow": {
+                "description": "允许的 HTTP 方法列表（GET）。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -426,12 +483,15 @@
         "properties": {
           "items": {
             "type": "array",
+            "description": "本页经当前权限与可见性过滤后的结果；过滤隐藏候选或触达扫描上限后，条数可能少于 limit 甚至为空数组。",
             "items": {
               "$ref": "#/components/schemas/Item"
             }
           },
           "next_cursor": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 1024,
+            "description": "下一页续读游标；仅当为空字符串时表示分页结束，不能以 items 长度小于 limit 判断结束。"
           }
         },
         "required": [
@@ -465,12 +525,15 @@
         "properties": {
           "items": {
             "type": "array",
+            "description": "本页当前仍可见的有效投票；已撤回或无权限的目标过滤后条数可能少于 limit。",
             "items": {
               "$ref": "#/components/schemas/Vote"
             }
           },
           "next_cursor": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 1024,
+            "description": "下一页续读游标；仅当为空字符串时表示分页结束。"
           }
         },
         "required": [
@@ -483,7 +546,16 @@
         "additionalProperties": false,
         "properties": {
           "code": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "invalid_input",
+              "unauthenticated",
+              "not_found",
+              "method_not_allowed",
+              "unavailable",
+              "timeout",
+              "cancelled"
+            ]
           }
         },
         "required": [
