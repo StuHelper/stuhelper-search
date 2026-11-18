@@ -30,9 +30,11 @@ scenario_tests:
     - httpapi_contract_test.go#TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed
     - index_collation_cursor_test.go#TestIndexOrderUnicodeCollationOpaqueCursorAndSchoolQueryRules
     - error_window_test.go#TestErrorCodeEnumRetryAfterAndPopularWindowDays
+    - filter_summary_test.go#TestSummaryFieldsAndMultiDimensionalFilters
   DS-04:
     - integration_test.go#TestMyVotesHTTPAndTimeout
     - httpapi_contract_test.go#TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed
+    - filter_summary_test.go#TestMyVotesSummaryFieldsAndBoundedPageFill
   DS-05:
     - activity_test.go#TestHeatWeightsWindowAndTeachers
     - activity_test.go#TestActivityOwnership

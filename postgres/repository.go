@@ -157,7 +157,7 @@ func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, 
 		return nil, s.ErrIndexBuilding
 	}
 	afterSource, afterID, ok := splitAfter(f.After)
-	if !ok || f.Limit < 1 || f.Limit > 100 || !validDBString(f.Query) || !validDBString(f.After) || !validDBString(f.Kind) {
+	if !ok || f.Limit < 1 || f.Limit > 100 || !validDBString(f.Query) || !validDBString(f.After) || !validDBString(f.Kind) || !validDBString(f.SchoolID) || !validDBString(f.CourseID) || !validDBString(f.TeacherID) {
 		return nil, s.ErrInput
 	}
 	// Parameterized substring search gives literal semantics for %, _ and backslashes.
@@ -191,8 +191,11 @@ func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, 
 	       position(lower($3 COLLATE "pg_c_utf8") in lower((data->>'title') COLLATE "pg_c_utf8")) > 0
 	   END)
 	   AND ($4 = '' OR data->'target'->>'kind' = $4)
-	 ORDER BY source COLLATE "C", id COLLATE "C"
-	 LIMIT $5`, afterSource, afterID, f.Query, f.Kind, f.Limit)
+	 AND ($6='' OR data->>'school_id'=$6)
+ AND ($7='' OR data->>'course_id'=$7)
+ AND ($8='' OR jsonb_exists(COALESCE(NULLIF(data->'teacher_ids','null'::jsonb),'[]'::jsonb),$8))
+ ORDER BY source COLLATE "C", id COLLATE "C"
+	 LIMIT $5`, afterSource, afterID, f.Query, f.Kind, f.Limit, f.SchoolID, f.CourseID, f.TeacherID)
 	if e != nil {
 		return nil, safe(e)
 	}
