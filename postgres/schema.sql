@@ -65,6 +65,15 @@ BEGIN
  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='search.state'::regclass AND attname='cursor_key' AND NOT attisdropped) THEN
   ALTER TABLE search.state ADD COLUMN cursor_key bytea;
  END IF;
+ IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='search.state'::regclass AND attname='rebuilt_at' AND NOT attisdropped) THEN
+  ALTER TABLE search.state ADD COLUMN rebuilt_at timestamptz;
+ END IF;
+ IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='search.state'::regclass AND attname='activity_from' AND NOT attisdropped) THEN
+  ALTER TABLE search.state ADD COLUMN activity_from date;
+ END IF;
+ IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='search.state'::regclass AND attname='activity_to' AND NOT attisdropped) THEN
+  ALTER TABLE search.state ADD COLUMN activity_to date;
+ END IF;
 END $$;
 INSERT INTO search.state(id,ready) VALUES(true,false) ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS search.activities (
@@ -74,6 +83,7 @@ CREATE TABLE IF NOT EXISTS search.activities (
  data jsonb NOT NULL, PRIMARY KEY(source,id), UNIQUE(source,kind,object_id,day)
 );
 CREATE INDEX IF NOT EXISTS search_activity_window ON search.activities(kind,day);
+CREATE INDEX IF NOT EXISTS search_activities_day_key ON search.activities(day, source, id);
 CREATE INDEX IF NOT EXISTS search_activities_by_day_c ON search.activities(kind, day, source COLLATE "C", id COLLATE "C") WHERE (data->>'visible')::boolean;
 DO $$
 DECLARE

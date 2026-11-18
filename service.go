@@ -117,11 +117,69 @@ func canonicalDocument(d Document) Document {
 	return d
 }
 
+func (s *Service) observe(op, src, code string, start time.Time, scanned, skips int) {
+	if s.config.Observer != nil {
+		switch src {
+		case "catalog", "reviews", "resources", "favorites":
+		default:
+			src = ""
+		}
+		s.config.Observer.ObserveSearch(Observation{
+			Operation:     op,
+			Source:        src,
+			ErrorCode:     code,
+			Duration:      time.Since(start),
+			Scanned:       scanned,
+			RevisionSkips: skips,
+		})
+	}
+}
+
+func errorCode(err error, defaultCode string) string {
+	switch {
+	case err == nil:
+		return "ok"
+	case errors.Is(err, ErrInput):
+		return "invalid_input"
+	case errors.Is(err, ErrUnauthenticated):
+		return "unauthenticated"
+	case errors.Is(err, ErrConflict):
+		return "event_conflict"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		return defaultCode
+	}
+}
+
+type statusWindowRebuilder interface {
+	RebuildWindowAt(context.Context, time.Time, time.Time, time.Time, func(func([]Document) error, func([]ActivitySnapshot) error) error) error
+}
+
+func (s *Service) Status(ctx context.Context) (Status, error) {
+	start := time.Now()
+	sr, ok := s.repo.(StatusReader)
+	if !ok {
+		s.observe("status", "", "storage_unavailable", start, 0, 0)
+		return Status{}, ErrUnavailable
+	}
+	ctx, cancel := context.WithTimeout(ctx, s.config.QueryTimeout)
+	defer cancel()
+	st, err := sr.Status(ctx)
+	s.observe("status", "", errorCode(err, "storage_unavailable"), start, 0, 0)
+	return st, err
+}
+
 func (s *Service) Consume(ctx context.Context, e Event) error {
+	start := time.Now()
 	if e.SpecVersion != "1.0" || e.ID == "" || !searchText(e.ID, 200) || e.Source != e.Data.Target.Source || e.Subject != e.Data.Target.ID || e.Type != e.Source+".discovery.v1" || e.Time.IsZero() {
+		s.observe("consume", "", "invalid_input", start, 0, 0)
 		return ErrInput
 	}
 	if err := Validate(e.Data); err != nil {
+		s.observe("consume", e.Source, errorCode(err, "invalid_input"), start, 0, 0)
 		return err
 	}
 	canonical := e
@@ -129,12 +187,15 @@ func (s *Service) Consume(ctx context.Context, e Event) error {
 	canonical.Data = canonicalDocument(e.Data)
 	b, err := json.Marshal(canonical)
 	if err != nil {
+		s.observe("consume", e.Source, "invalid_input", start, 0, 0)
 		return ErrInput
 	}
 	h := sha256.Sum256(b)
 	ctx, cancel := context.WithTimeout(ctx, s.config.QueryTimeout)
 	defer cancel()
-	return s.repo.Apply(ctx, e, hex.EncodeToString(h[:]))
+	err = s.repo.Apply(ctx, e, hex.EncodeToString(h[:]))
+	s.observe("consume", e.Source, errorCode(err, "storage_unavailable"), start, 1, 0)
+	return err
 }
 
 type windowRebuilder interface {
@@ -142,15 +203,22 @@ type windowRebuilder interface {
 }
 
 func (s *Service) Rebuild(ctx context.Context) error {
+	start := time.Now()
+	rebuiltAt := s.config.Now().UTC()
+	from, to := s.activityWindowAt(rebuiltAt)
 	ctx, cancel := context.WithTimeout(ctx, s.config.RebuildTimeout)
 	defer cancel()
-	from, to := s.activityWindow()
-	load := func(put func([]Document) error, putActivity func([]ActivitySnapshot) error) error {
+	var activeSource string
+	var errCode = "storage_unavailable"
+	var scanned int
+	loader := func(put func([]Document) error, putActivity func([]ActivitySnapshot) error) error {
 		for _, source := range []string{"catalog", "reviews", "resources"} {
 			cursor := ""
 			seen := map[string]bool{}
 			for pages := 0; ; pages++ {
+				activeSource = source
 				if pages >= 10000 {
+					errCode = "invalid_source_data"
 					return ErrUnavailable
 				}
 				docs, next, e := s.sources.DiscoverySnapshot(ctx, source, cursor, 100)
@@ -158,18 +226,24 @@ func (s *Service) Rebuild(ctx context.Context) error {
 					break
 				}
 				if e != nil {
+					errCode = "upstream_unavailable"
 					return e
 				}
 				if len(docs) > 100 || next != "" && (next == cursor || seen[next]) {
+					errCode = "invalid_source_data"
 					return ErrUnavailable
 				}
 				seen[next] = true
 				for _, d := range docs {
+					scanned++
 					if d.Target.Source != source || Validate(d) != nil {
+						errCode = "invalid_source_data"
 						return ErrUnavailable
 					}
 				}
+				activeSource = ""
 				if e = put(docs); e != nil {
+					errCode = "storage_unavailable"
 					return e
 				}
 				if next == "" {
@@ -178,12 +252,26 @@ func (s *Service) Rebuild(ctx context.Context) error {
 				cursor = next
 			}
 		}
-		return s.rebuildActivitiesWindow(ctx, from, to, putActivity)
+		src, code, actScanned, e := s.rebuildActivitiesWindow(ctx, from, to, putActivity)
+		scanned += actScanned
+		if e != nil {
+			activeSource = src
+			errCode = code
+			return e
+		}
+		activeSource = ""
+		return nil
 	}
-	if wr, ok := s.repo.(windowRebuilder); ok {
-		return wr.RebuildWindow(ctx, from, to, load)
+	var err error
+	if wr, ok := s.repo.(statusWindowRebuilder); ok {
+		err = wr.RebuildWindowAt(ctx, rebuiltAt, from, to, loader)
+	} else if wr, ok := s.repo.(windowRebuilder); ok {
+		err = wr.RebuildWindow(ctx, from, to, loader)
+	} else {
+		err = s.repo.Rebuild(ctx, loader)
 	}
-	return s.repo.Rebuild(ctx, load)
+	s.observe("rebuild", activeSource, errorCode(err, errCode), start, scanned, 0)
+	return err
 }
 func key(d Document) string  { return d.Target.Source + "/" + d.Target.ID }
 func encode(v string) string { return base64.RawURLEncoding.EncodeToString([]byte(v)) }
@@ -256,18 +344,24 @@ func (s *Service) openCursor(ctx context.Context, scope, user, token string) (st
 	return out, nil
 }
 
-func (s *Service) current(ctx context.Context, user string, d Document) (Document, bool, error) {
+func (s *Service) current(ctx context.Context, user string, d Document) (Document, bool, bool, string, error) {
 	live, ok, e := s.sources.Current(ctx, user, d.Target)
 	if e != nil {
-		return Document{}, false, upstreamError(ctx)
+		return Document{}, false, false, "upstream_unavailable", upstreamError(ctx)
 	}
 	if !ok {
-		return Document{}, false, nil
+		return Document{}, false, false, "", nil
 	}
 	if Validate(live) != nil || live.Target != d.Target {
-		return Document{}, false, upstreamError(ctx)
+		return Document{}, false, false, "invalid_source_data", upstreamError(ctx)
 	}
-	return live, live.Visible && live.Revision == d.Revision, nil
+	if !live.Visible {
+		return live, false, false, "", nil
+	}
+	if live.Revision != d.Revision {
+		return live, false, true, "", nil
+	}
+	return live, true, false, "", nil
 }
 func auth(user string) error {
 	if user == "" {
@@ -276,114 +370,134 @@ func auth(user string) error {
 	return nil
 }
 func (s *Service) Search(ctx context.Context, user, q, kind, cursor string, limit int) (Page, error) {
+	start := time.Now()
 	q = strings.TrimSpace(q)
 	out := Page{Items: []Item{}}
 	if e := auth(user); e != nil {
+		s.observe("search", "", "unauthenticated", start, 0, 0)
 		return out, e
 	}
 	if !searchText(q, 200) || limit < 1 || limit > 100 || kind != "" && kind != "school" && kind != "course" && kind != "teacher" && kind != "review" && kind != "resource" {
+		s.observe("search", "", "invalid_input", start, 0, 0)
 		return out, ErrInput
 	}
-	started := time.Now()
 	softBudget := s.config.QueryTimeout * 3 / 4
 	ctx, cancel := context.WithTimeout(ctx, s.config.QueryTimeout)
 	defer cancel()
 	after, e := s.openCursor(ctx, "search", user, cursor)
 	if e != nil {
+		s.observe("search", "", "invalid_input", start, 0, 0)
 		return out, e
 	}
+	scanned, skips := 0, 0
+	continuation := func() (Page, error) {
+		next, err := s.sealCursor(ctx, "search", user, after)
+		s.observe("search", "", errorCode(err, "storage_unavailable"), start, scanned, skips)
+		if err != nil {
+			return Page{}, err
+		}
+		out.NextCursor = next
+		return out, nil
+	}
 	// The cursor tracks examined candidates and stops before QueryTimeout so restricted blocks cannot stall pagination.
-	for scanned := 0; scanned < 10000; {
-		if scanned > 0 && time.Since(started) >= softBudget {
-			next, err := s.sealCursor(ctx, "search", user, after)
-			return Page{Items: out.Items, NextCursor: next}, err
+	for scanned < 10000 {
+		if scanned > 0 && time.Since(start) >= softBudget {
+			return continuation()
 		}
 		docs, e := s.repo.Candidates(ctx, Filter{Query: q, Kind: kind, After: after, Limit: 100})
 		if e != nil {
+			s.observe("search", "", errorCode(e, "storage_unavailable"), start, scanned, skips)
 			return out, e
 		}
 		for i, d := range docs {
-			if scanned > 0 && time.Since(started) >= softBudget {
-				next, err := s.sealCursor(ctx, "search", user, after)
-				return Page{Items: out.Items, NextCursor: next}, err
+			if scanned > 0 && time.Since(start) >= softBudget {
+				return continuation()
 			}
 			scanned++
 			after = key(d)
-			live, ok, e := s.current(ctx, user, d)
+			live, ok, skippedRev, errCategory, e := s.current(ctx, user, d)
 			if e != nil {
+				s.observe("search", d.Target.Source, errorCode(e, errCategory), start, scanned, skips)
 				return Page{}, e
+			}
+			if skippedRev {
+				skips++
 			}
 			if ok {
 				out.Items = append(out.Items, documentItem(live))
 			}
 			if len(out.Items) == limit {
-				next, err := s.sealCursor(ctx, "search", user, after)
-				if err != nil {
-					return Page{}, err
-				}
-				out.NextCursor = next
-				return out, nil
+				return continuation()
 			}
 			if scanned == 10000 && (i < len(docs)-1 || len(docs) == 100) {
-				next, err := s.sealCursor(ctx, "search", user, after)
-				if err != nil {
-					return Page{}, err
-				}
-				out.NextCursor = next
-				return out, nil
+				return continuation()
 			}
 		}
 		if len(docs) < 100 {
+			s.observe("search", "", "ok", start, scanned, skips)
 			return out, nil
 		}
 	}
-	next, e := s.sealCursor(ctx, "search", user, after)
-	if e != nil {
-		return Page{}, e
-	}
-	out.NextCursor = next
-	return out, nil
+	return continuation()
 }
 func (s *Service) MyVotes(ctx context.Context, user, cursor string, limit int) (Votes, error) {
+	start := time.Now()
 	if e := auth(user); e != nil {
+		s.observe("my_votes", "", "unauthenticated", start, 0, 0)
 		return Votes{}, e
 	}
 	if limit < 1 || limit > 100 || len(cursor) > 1024 || !searchText(cursor, 1024) {
+		s.observe("my_votes", "", "invalid_input", start, 0, 0)
 		return Votes{}, ErrInput
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.config.QueryTimeout)
 	defer cancel()
 	v, e := s.sources.MyVotes(ctx, user, cursor, limit)
 	if e != nil {
-		return Votes{}, upstreamError(ctx)
+		err := upstreamError(ctx)
+		s.observe("my_votes", "reviews", errorCode(err, "upstream_unavailable"), start, 0, 0)
+		return Votes{}, err
 	}
 	if len(v.Items) > limit || len(v.NextCursor) > 1024 {
-		return Votes{}, upstreamError(ctx)
+		err := upstreamError(ctx)
+		s.observe("my_votes", "reviews", errorCode(err, "invalid_source_data"), start, 0, 0)
+		return Votes{}, err
 	}
 	out := Votes{Items: []Vote{}, NextCursor: v.NextCursor}
+	scanned := 0
 	for _, vote := range v.Items {
+		scanned++
 		if vote.Target.Source != "reviews" || !validTarget(vote.Target) || (vote.Choice != "up" && vote.Choice != "down") {
-			return Votes{}, upstreamError(ctx)
+			err := upstreamError(ctx)
+			s.observe("my_votes", "reviews", errorCode(err, "invalid_source_data"), start, scanned, 0)
+			return Votes{}, err
 		}
 		d, ok, e := s.sources.Current(ctx, user, vote.Target)
 		if e != nil {
-			return Votes{}, upstreamError(ctx)
+			err := upstreamError(ctx)
+			s.observe("my_votes", "reviews", errorCode(err, "upstream_unavailable"), start, scanned, 0)
+			return Votes{}, err
 		}
 		if ok && (d.Target != vote.Target || Validate(d) != nil) {
+			s.observe("my_votes", "reviews", "invalid_source_data", start, scanned, 0)
 			return Votes{}, ErrUnavailable
 		}
 		if ok && d.Visible {
 			out.Items = append(out.Items, vote)
 		}
 	}
+	s.observe("my_votes", "", "ok", start, scanned, 0)
 	return out, nil
 }
 func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit int) (Page, error) {
+	start := time.Now()
 	out := Page{Items: []Item{}}
 	if e := auth(user); e != nil {
+		s.observe("popular", "", "unauthenticated", start, 0, 0)
 		return out, e
 	}
 	if limit < 1 || limit > 100 || (kind != "course" && kind != "teacher") {
+		s.observe("popular", "", "invalid_input", start, 0, 0)
 		return out, ErrInput
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.config.QueryTimeout)
@@ -391,6 +505,7 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 	scope := "popular:" + kind
 	after, e := s.openCursor(ctx, scope, user, cursor)
 	if e != nil {
+		s.observe("popular", "", "invalid_input", start, 0, 0)
 		return out, e
 	}
 	type ranked struct {
@@ -401,14 +516,18 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 	scores := map[Target]*ranked{}
 	from, to := s.activityWindow()
 	f := ActivityFilter{Kind: kind, From: from, To: to, Limit: 100, AfterDay: from.UTC().Format(time.DateOnly)}
-	for scanned := 0; ; {
+	scanned := 0
+	skips := 0
+	for {
 		docs, e := s.repo.Activities(ctx, f)
 		if e != nil {
+			s.observe("popular", "", errorCode(e, "storage_unavailable"), start, scanned, skips)
 			return out, e
 		}
 		for _, d := range docs {
 			scanned++
 			if scanned > 10000 {
+				s.observe("popular", "", "scan_limit_exceeded", start, scanned, skips)
 				return out, ErrUnavailable
 			}
 			f.After = d.Source + "/" + d.ID
@@ -418,15 +537,22 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 				continue
 			}
 			if e != nil {
-				return out, upstreamError(ctx)
+				err := upstreamError(ctx)
+				s.observe("popular", d.Source, errorCode(err, "upstream_unavailable"), start, scanned, skips)
+				return out, err
 			}
 			if !ok {
 				continue
 			}
 			if ValidateActivity(live) != nil || live.Source != d.Source || live.ID != d.ID || live.Target != d.Target || live.Day != d.Day {
+				s.observe("popular", d.Source, "invalid_source_data", start, scanned, skips)
 				return out, ErrUnavailable
 			}
-			if !live.Visible || live.Revision < d.Revision {
+			if !live.Visible {
+				continue
+			}
+			if live.Revision < d.Revision {
+				skips++
 				continue
 			}
 			v := scores[d.Target]
@@ -453,9 +579,12 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 		}
 		d, ok, e := s.sources.Current(ctx, user, t)
 		if e != nil {
-			return out, upstreamError(ctx)
+			err := upstreamError(ctx)
+			s.observe("popular", t.Source, errorCode(err, "upstream_unavailable"), start, scanned, skips)
+			return out, err
 		}
 		if ok && (d.Target != t || Validate(d) != nil) {
+			s.observe("popular", t.Source, "invalid_source_data", start, scanned, skips)
 			return out, ErrUnavailable
 		}
 		if ok && d.Visible {
@@ -487,8 +616,10 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 		}
 	}
 	if !passed {
+		s.observe("popular", "", "invalid_input", start, scanned, skips)
 		return Page{}, ErrInput
 	}
+	s.observe("popular", "", "ok", start, scanned, skips)
 	return out, nil
 }
 

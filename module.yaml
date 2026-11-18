@@ -42,6 +42,7 @@ scenario_tests:
     - validation_inbox_test.go#TestUTF8NullValidationUnicodeLengthsAndInboxCanonicalDedup
   DS-07:
     - validation_inbox_test.go#TestLegacyInboxReceiptsProtectBothEventTypes
+    - observability_maintenance_test.go#TestSanitizedObservationsAcrossSnapshotPages
     - integration_test.go#TestContentDocumentKinds
     - integration_test.go#TestProjectionReplayRebuildAndIsolation
     - activity_test.go#TestActivityReplayAndRebuild
@@ -49,6 +50,7 @@ scenario_tests:
     - rebuild_window_test.go#TestRebuildPreservesOutOfWindowActivitiesBatchesWritesAndDetectsCycles
     - validation_inbox_test.go#TestUTF8NullValidationUnicodeLengthsAndInboxCanonicalDedup
     - migration_runtime_test.go#TestIdempotentMigrateLockFreeAndStrictRuntimePrivilegeChecks
+    - observability_maintenance_test.go#TestObserverStatusAndBoundedMaintenanceCleanup
 
   DS-SCHOOL-01:
     - school_search_test.go#TestSchoolSearchCodesNamesAliasesCurrentRightsAndRebuild
