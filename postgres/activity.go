@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	s "github.com/StuHelper/stuhelper-search"
 )
 
@@ -27,16 +26,8 @@ func (r *Repository) ApplyActivity(ctx context.Context, event s.ActivityEvent, d
 	if e = lock(ctx, tx); e != nil {
 		return safe(e)
 	}
-	var old string
-	e = tx.QueryRowContext(ctx, "SELECT digest FROM search.inbox WHERE source=$1 AND event_type=$2 AND id=$3", event.Source, event.Type, event.ID).Scan(&old)
-	if e == nil {
-		if old != digest {
-			return s.ErrConflict
-		}
-		return nil
-	}
-	if !errors.Is(e, sql.ErrNoRows) {
-		return safe(e)
+	if seen, err := replayed(ctx, tx, event.Source, event.Type, event.ID, digest, event); seen || err != nil {
+		return err
 	}
 	if e = putActivity(ctx, tx, event.Data, false); e != nil {
 		return safe(e)

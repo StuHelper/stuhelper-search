@@ -106,9 +106,10 @@ func (s *Service) Consume(ctx context.Context, e Event) error {
 	if err := Validate(e.Data); err != nil {
 		return err
 	}
-	e.Time = e.Time.UTC()
-	e.Data = canonicalDocument(e.Data)
-	b, err := json.Marshal(e)
+	canonical := e
+	canonical.Time = e.Time.UTC()
+	canonical.Data = canonicalDocument(e.Data)
+	b, err := json.Marshal(canonical)
 	if err != nil {
 		return ErrInput
 	}
@@ -157,7 +158,7 @@ func (s *Service) Rebuild(ctx context.Context) error {
 func key(d Document) string  { return d.Target.Source + "/" + d.Target.ID }
 func encode(v string) string { return base64.RawURLEncoding.EncodeToString([]byte(v)) }
 func decode(v string) (string, error) {
-	if len(v) > 1024 {
+	if len(v) > 2048 {
 		return "", ErrInput
 	}
 	b, e := base64.RawURLEncoding.DecodeString(v)

@@ -2,7 +2,10 @@ package search_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	s "github.com/StuHelper/stuhelper-search"
 	"github.com/StuHelper/stuhelper-search/postgres"
@@ -137,5 +140,76 @@ func TestUTF8NullValidationUnicodeLengthsAndInboxCanonicalDedup(t *testing.T) {
 	var legacyDigest string
 	if err := db.QueryRow(`SELECT digest FROM search.inbox WHERE source='catalog' AND id='legacy-1'`).Scan(&legacyDigest); err != nil || legacyDigest != "digest-1" {
 		t.Fatalf("legacy receipt lost after migration: digest=%q err=%v", legacyDigest, err)
+	}
+}
+
+func TestUnicodeTargetRoundTripsThroughSearchAndActivity(t *testing.T) {
+	svc, _, f, _ := setup(t)
+	ctx := context.Background()
+	for _, suffix := range []string{"a", "b"} {
+		d := doc("catalog", "course", strings.Repeat("🌍", 199)+suffix)
+		d.Title = "Unicode target"
+		f.docs[d.Target] = d
+		if err := svc.Consume(ctx, event(d, suffix)); err != nil {
+			t.Fatal(err)
+		}
+		a := activity("catalog", "course", d.Target.ID, "2026-11-09", map[string]int64{"views": 1})
+		if err := svc.ConsumeActivity(ctx, activityEvent(a, "activity-"+suffix)); err != nil {
+			t.Errorf("activity: %v", err)
+		}
+	}
+	p, err := svc.Search(ctx, "u", "Unicode target", "course", "", 1)
+	if err != nil || len(p.Items) != 1 || p.NextCursor == "" {
+		t.Fatalf("first page: %+v %v", p, err)
+	}
+	next, err := svc.Search(ctx, "u", "Unicode target", "course", p.NextCursor, 1)
+	if err != nil || len(next.Items) != 1 || next.Items[0].Target == p.Items[0].Target {
+		t.Fatalf("Unicode continuation failed: %+v %v", next, err)
+	}
+}
+
+func TestLegacyInboxReceiptsProtectBothEventTypes(t *testing.T) {
+	svc, _, _, db := setup(t)
+	ctx := context.Background()
+	d := doc("catalog", "course", "legacy-doc")
+	d.At = d.At.In(time.FixedZone("CST", 8*3600))
+	docEvent := event(d, "legacy-doc-id")
+	docEvent.Time = d.At
+	a := activity("catalog", "course", "legacy-doc", "2026-11-09", map[string]int64{"views": 1})
+	actEvent := activityEvent(a, "legacy-act-id")
+	actEvent.Time = d.At
+	if _, err := db.Exec(`DROP TABLE search.inbox; CREATE TABLE search.inbox(source text NOT NULL,id text NOT NULL,digest text NOT NULL,PRIMARY KEY(source,id))`); err != nil {
+		t.Fatal(err)
+	}
+	for id, ev := range map[string]any{docEvent.ID: docEvent, actEvent.ID: actEvent} {
+		raw, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256(raw)
+		if _, err = db.Exec(`INSERT INTO search.inbox VALUES ('catalog',$1,$2)`, id, hex.EncodeToString(sum[:])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := postgres.Migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Consume(ctx, docEvent); err != nil {
+		t.Errorf("legacy content replay: %v", err)
+	}
+	if err := svc.ConsumeActivity(ctx, actEvent); err != nil {
+		t.Errorf("legacy activity replay: %v", err)
+	}
+	docEvent.Data.Title = "different"
+	actEvent.Data.Metrics["views"] = 2
+	if err := svc.Consume(ctx, docEvent); !errors.Is(err, s.ErrConflict) {
+		t.Errorf("legacy content conflict: %v", err)
+	}
+	if err := svc.ConsumeActivity(ctx, actEvent); !errors.Is(err, s.ErrConflict) {
+		t.Errorf("legacy activity conflict: %v", err)
+	}
+	var rows int
+	if err := db.QueryRow(`SELECT (SELECT count(*) FROM search.documents)+(SELECT count(*) FROM search.activities)+(SELECT count(*) FROM search.inbox WHERE event_type <> '')`).Scan(&rows); err != nil || rows != 0 {
+		t.Fatalf("legacy replay wrote %d rows: %v", rows, err)
 	}
 }
