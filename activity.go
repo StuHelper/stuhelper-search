@@ -30,9 +30,10 @@ type ActivityEvent struct {
 	Data        ActivitySnapshot `json:"data"`
 }
 type ActivityFilter struct {
-	Kind, After string
-	From, To    time.Time
-	Limit       int
+	Kind, After    string
+	ExcludeSources []string
+	From, To       time.Time
+	Limit          int
 }
 
 // ActivityID is independent of provider; the database key includes Source.

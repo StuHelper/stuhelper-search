@@ -7,12 +7,18 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
+)
+
+const (
+	maxHeatWeight          = 1e9
+	maxPopularCandidates   = 10000
+	maxPopularActivityRows = 500000
 )
 
 type Service struct {
@@ -27,7 +33,7 @@ func New(repo Repository, sources Sources, c Config) (*Service, error) {
 	}
 	positive := false
 	for _, w := range c.HeatWeights {
-		if math.IsNaN(w) || math.IsInf(w, 0) || w < 0 {
+		if math.IsNaN(w) || math.IsInf(w, 0) || w < 0 || w > maxHeatWeight {
 			return nil, ErrInput
 		}
 		positive = positive || w > 0
@@ -245,6 +251,243 @@ func (s *Service) MyVotes(ctx context.Context, user, cursor string, limit int) (
 	}
 	return out, nil
 }
+
+type rankedCandidate struct {
+	target  Target
+	score   float64
+	samples int64
+}
+
+func targetKey(t Target) string { return t.Source + "/" + t.ID }
+
+func formatPopularCursor(score float64, t Target) string {
+	return strconv.FormatFloat(score, 'g', -1, 64) + ":" + targetKey(t)
+}
+
+func parsePopularCursor(after, kind string) (float64, string, error) {
+	if after == "" {
+		return 0, "", nil
+	}
+	scoreText, afterKey, ok := strings.Cut(after, ":")
+	if !ok {
+		return 0, "", ErrInput
+	}
+	score, err := strconv.ParseFloat(scoreText, 64)
+	if err != nil || math.IsNaN(score) || math.IsInf(score, 0) || score < 0 {
+		return 0, "", ErrInput
+	}
+	src, id, ok := strings.Cut(afterKey, "/")
+	if !ok || src != "catalog" || !validTarget(Target{Source: src, Kind: kind, ID: id}) {
+		return 0, "", ErrInput
+	}
+	return score, afterKey, nil
+}
+
+func (s *Service) accumulateActivity(scores map[Target]*rankedCandidate, d, live ActivitySnapshot) error {
+	if ValidateActivity(live) != nil || live.Source != d.Source || live.ID != d.ID || live.Target != d.Target || live.Day != d.Day {
+		return ErrUnavailable
+	}
+	if !live.Visible || live.Revision != d.Revision {
+		return nil
+	}
+	v := scores[d.Target]
+	if v == nil {
+		if len(scores) >= maxPopularCandidates {
+			return ErrUnavailable
+		}
+		v = &rankedCandidate{target: d.Target}
+		scores[d.Target] = v
+	}
+	for i, name := range []string{"views", "reviews", "favorites", "interactions"} {
+		n := live.Metrics[name]
+		v.score += float64(n) * s.config.HeatWeights[i]
+		v.samples += n
+	}
+	return nil
+}
+
+func (s *Service) scanPopularActivities(ctx context.Context, user, kind string) (map[Target]*rankedCandidate, error) {
+	scores := map[Target]*rankedCandidate{}
+	disabled := map[string]bool{}
+	from, to := s.activityWindow()
+	f := ActivityFilter{Kind: kind, From: from, To: to, Limit: 500}
+	batchSrc, hasBatch := s.sources.(BatchActivitySource)
+	scanned := 0
+	for {
+		docs, e := s.repo.Activities(ctx, f)
+		if e != nil {
+			return nil, e
+		}
+		if len(docs) > 0 {
+			f.After = docs[len(docs)-1].Source + "/" + docs[len(docs)-1].ID
+		}
+		if hasBatch {
+			groups := map[string][]ActivitySnapshot{}
+			order := []string{}
+			for _, d := range docs {
+				if disabled[d.Source] {
+					continue
+				}
+				if _, ok := groups[d.Source]; !ok {
+					order = append(order, d.Source)
+				}
+				groups[d.Source] = append(groups[d.Source], d)
+			}
+			for _, src := range order {
+				group := groups[src]
+				for start := 0; start < len(group); start += 100 {
+					if disabled[src] {
+						break
+					}
+					end := min(start+100, len(group))
+					chunk := group[start:end]
+					ids := make([]string, len(chunk))
+					wanted := make(map[string]bool, len(chunk))
+					for i, d := range chunk {
+						ids[i] = d.ID
+						wanted[d.ID] = true
+					}
+					liveRows, e := batchSrc.CurrentActivities(ctx, user, src, ids)
+					if errors.Is(e, ErrSourceDisabled) {
+						disabled[src] = true
+						f.ExcludeSources = append(f.ExcludeSources, src)
+						break
+					}
+					if e != nil {
+						return nil, upstreamError(ctx)
+					}
+					if len(liveRows) > len(chunk) {
+						return nil, ErrUnavailable
+					}
+					byID := make(map[string]ActivitySnapshot, len(liveRows))
+					for _, live := range liveRows {
+						if !wanted[live.ID] {
+							return nil, ErrUnavailable
+						}
+						if _, dup := byID[live.ID]; dup {
+							return nil, ErrUnavailable
+						}
+						byID[live.ID] = live
+					}
+					for _, d := range chunk {
+						scanned++
+						if scanned > maxPopularActivityRows {
+							return nil, ErrUnavailable
+						}
+						live, ok := byID[d.ID]
+						if !ok {
+							continue
+						}
+						if e := s.accumulateActivity(scores, d, live); e != nil {
+							return nil, e
+						}
+					}
+				}
+			}
+		} else {
+			for _, d := range docs {
+				if disabled[d.Source] {
+					continue
+				}
+				live, ok, e := s.sources.CurrentActivity(ctx, user, d.Source, d.ID)
+				if errors.Is(e, ErrSourceDisabled) {
+					disabled[d.Source] = true
+					f.ExcludeSources = append(f.ExcludeSources, d.Source)
+					continue
+				}
+				scanned++
+				if scanned > maxPopularActivityRows {
+					return nil, ErrUnavailable
+				}
+				if e != nil {
+					return nil, upstreamError(ctx)
+				}
+				if !ok {
+					continue
+				}
+				if e := s.accumulateActivity(scores, d, live); e != nil {
+					return nil, e
+				}
+			}
+		}
+		if len(docs) < f.Limit {
+			break
+		}
+	}
+	return scores, nil
+}
+
+func (s *Service) resolvePopularPage(ctx context.Context, user string, candidates []rankedCandidate, limit int) (Page, error) {
+	out := Page{Items: []Item{}}
+	batchSrc, hasBatch := s.sources.(BatchCurrentSource)
+	if !hasBatch {
+		for _, c := range candidates {
+			d, ok, e := s.sources.Current(ctx, user, c.target)
+			if e != nil {
+				return Page{}, upstreamError(ctx)
+			}
+			if ok && (d.Target != c.target || Validate(d) != nil) {
+				return Page{}, ErrUnavailable
+			}
+			if ok && d.Visible {
+				out.Items = append(out.Items, documentItem(d))
+				if len(out.Items) == limit {
+					out.NextCursor = encode(formatPopularCursor(c.score, c.target))
+					break
+				}
+			}
+		}
+		return out, nil
+	}
+	firstBatch := true
+	for idx := 0; idx < len(candidates) && len(out.Items) < limit; {
+		need := limit - len(out.Items)
+		batchSize := need
+		if !firstBatch && batchSize < 32 {
+			batchSize = 32
+		}
+		firstBatch = false
+		batchSize = min(batchSize, 100, len(candidates)-idx)
+		chunk := candidates[idx : idx+batchSize]
+		idx += batchSize
+		targets := make([]Target, len(chunk))
+		wanted := make(map[Target]bool, len(chunk))
+		for i, c := range chunk {
+			targets[i] = c.target
+			wanted[c.target] = true
+		}
+		// All popular targets belong to catalog; check them in a single bounded batch.
+		liveDocs, e := batchSrc.CurrentBatch(ctx, user, "catalog", targets)
+		if e != nil {
+			return Page{}, upstreamError(ctx)
+		}
+		if len(liveDocs) > len(chunk) {
+			return Page{}, ErrUnavailable
+		}
+		byTarget := make(map[Target]Document, len(liveDocs))
+		for _, d := range liveDocs {
+			if !wanted[d.Target] || Validate(d) != nil {
+				return Page{}, ErrUnavailable
+			}
+			if _, dup := byTarget[d.Target]; dup {
+				return Page{}, ErrUnavailable
+			}
+			byTarget[d.Target] = d
+		}
+		for _, c := range chunk {
+			d, ok := byTarget[c.target]
+			if ok && d.Visible {
+				out.Items = append(out.Items, documentItem(d))
+				if len(out.Items) == limit {
+					out.NextCursor = encode(formatPopularCursor(c.score, c.target))
+					break
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
 func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit int) (Page, error) {
 	out := Page{Items: []Item{}}
 	if e := auth(user); e != nil {
@@ -257,100 +500,40 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 	if e != nil {
 		return out, e
 	}
+	afterScore, afterKey, e := parsePopularCursor(after, kind)
+	if e != nil {
+		return out, e
+	}
 	ctx, cancel := context.WithTimeout(ctx, s.config.QueryTimeout)
 	defer cancel()
-	type ranked struct {
-		d       Document
-		score   float64
-		samples int64
+	scores, e := s.scanPopularActivities(ctx, user, kind)
+	if e != nil {
+		return out, e
 	}
-	scores := map[Target]*ranked{}
-	from, to := s.activityWindow()
-	f := ActivityFilter{Kind: kind, From: from, To: to, Limit: 100}
-	for scanned := 0; ; {
-		docs, e := s.repo.Activities(ctx, f)
-		if e != nil {
-			return out, e
-		}
-		for _, d := range docs {
-			scanned++
-			if scanned > 10000 {
-				return out, ErrUnavailable
-			}
-			f.After = d.Source + "/" + d.ID
-			live, ok, e := s.sources.CurrentActivity(ctx, user, d.Source, d.ID)
-			if errors.Is(e, ErrSourceDisabled) {
-				continue
-			}
-			if e != nil {
-				return out, upstreamError(ctx)
-			}
-			if !ok {
-				continue
-			}
-			if ValidateActivity(live) != nil || live.Source != d.Source || live.ID != d.ID || live.Target != d.Target || live.Day != d.Day {
-				return out, ErrUnavailable
-			}
-			if !live.Visible || live.Revision != d.Revision {
-				continue
-			}
-			v := scores[d.Target]
-			if v == nil {
-				v = &ranked{}
-				v.d.Target = d.Target
-				scores[d.Target] = v
-			}
-			for i, name := range []string{"views", "reviews", "favorites", "interactions"} {
-				n := live.Metrics[name]
-				v.score += float64(n) * s.config.HeatWeights[i]
-				v.samples += n
-			}
-		}
-		if len(docs) < 100 {
-			break
+	candidates := make([]rankedCandidate, 0, len(scores))
+	for _, v := range scores {
+		if v.samples >= int64(s.config.MinimumHeatSamples) {
+			candidates = append(candidates, *v)
 		}
 	}
-
-	rows := []ranked{}
-	for t, v := range scores {
-		if v.samples < int64(s.config.MinimumHeatSamples) {
-			continue
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].score == candidates[j].score {
+			return targetKey(candidates[i].target) < targetKey(candidates[j].target)
 		}
-		d, ok, e := s.sources.Current(ctx, user, t)
-		if e != nil {
-			return out, upstreamError(ctx)
-		}
-		if ok && (d.Target != t || Validate(d) != nil) {
-			return out, ErrUnavailable
-		}
-		if ok && d.Visible {
-			v.d = d
-			rows = append(rows, *v)
-		}
-	}
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].score == rows[j].score {
-			return key(rows[i].d) < key(rows[j].d)
-		}
-		return rows[i].score > rows[j].score
+		return candidates[i].score > candidates[j].score
 	})
-	passed := after == ""
-	for _, r := range rows {
-		token := fmt.Sprintf("%.17g:%s", r.score, key(r.d))
-		if !passed {
-			passed = token == after
-			continue
+	if after != "" {
+		start := len(candidates)
+		for i, c := range candidates {
+			// Keyset continuation tolerates score updates and removed anchors between page loads.
+			if c.score < afterScore || (c.score == afterScore && targetKey(c.target) > afterKey) {
+				start = i
+				break
+			}
 		}
-		out.Items = append(out.Items, documentItem(r.d))
-		if len(out.Items) == limit {
-			out.NextCursor = encode(token)
-			break
-		}
+		candidates = candidates[start:]
 	}
-	if !passed {
-		return Page{}, ErrInput
-	}
-	return out, nil
+	return s.resolvePopularPage(ctx, user, candidates, limit)
 }
 
 func upstreamError(ctx context.Context) error {

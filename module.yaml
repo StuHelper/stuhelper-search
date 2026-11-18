@@ -26,11 +26,14 @@ scenario_tests:
     - course_search_test.go#TestCourseSearchFieldsValidateAtEventBoundary
   DS-01:
     - integration_test.go#TestVisibilityPaginationAndHotTargets
+    - popular_scale_test.go#TestPopularKeysetCursorSurvivesScoreChangeAndRemoval
   DS-04:
     - integration_test.go#TestMyVotesHTTPAndTimeout
   DS-05:
     - activity_test.go#TestHeatWeightsWindowAndTeachers
     - activity_test.go#TestActivityOwnership
+    - popular_scale_test.go#TestPopularKeysetCursorSurvivesScoreChangeAndRemoval
+    - popular_scale_test.go#TestPopularCampusScaleDisabledSourceAndLazyCurrent
   DS-06:
     - integration_test.go#TestProjectionFailureRollback
     - activity_test.go#TestActivityReplayAndRebuild
