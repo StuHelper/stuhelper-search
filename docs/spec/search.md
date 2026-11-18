@@ -14,7 +14,7 @@ search 通过来源公开事件构建可重建投影，索引只保存公开标�
 
 HTTP 请求要求登录。Sources.Current 必须根据可信请求人、学校和操作查询来源当前权限及可见状态。修订不一致的候选暂不展示，来源故障返回 503。删除、下架和权限撤销无需等待投影事件即可影响查询。
 
-搜索使用字面子串匹配，按来源及 ID 排序。每页默认 20 条，上限 100。游标记录已检查候选位置，不暴露隐藏记录总量。一次最多检查 10000 条候选，搜索通过游标继续，热门排行超过上限返回暂不可用。
+搜索使用字面子串匹配，按来源及 ID 排序。每页默认 20 条，上限 100。游标记录已检查候选位置，不暴露隐藏记录总量。搜索一次最多检查 10000 条候选并通过游标继续；热门排行最多汇总 10000 个候选目标，采用键集游标续读，超过候选或活动行数上限返回暂不可用。
 
 查询超时由装配配置，必须大于零且不超过 30 秒，包含数据库和来源调用。来源适配器必须传递 context。重建总超时为两分钟，每批最多 100 条，每个来源最多 10000 批。
 
@@ -22,7 +22,7 @@ HTTP 请求要求登录。Sources.Current 必须根据可信请求人、学校�
 
 我的投票委托 reviews 的当前请求人公开接口，只返回有效选择并再次检查目标权限，修改及取消使用 reviews 自身接口。
 
-热门排行按对象汇总窗口内各来源的日快照，再用后台权重计算热度。权重顺序为浏览、评价、收藏、互动。最低样本量使用四项有效计数之和，与权重无关。按加权热度降序，同分按来源和对象 ID 排序。
+热门排行按对象汇总窗口内各来源的日快照，再用后台权重计算热度（单项权重不超过 1e9）。权重顺序为浏览、评价、收藏、互动。最低样本量使用四项有效计数之和，与权重无关。先按加权热度降序及来源和对象 ID 排序并跳过游标位置，再按需分批检查当前对象可见性，凑满本页即止。
 
 窗口按 UTC 日查询，开始为 now−HeatWindow 所在日的零点（包含），结束为当前日之后的零点（不包含）。当前日使用已提交快照，窗口参数和当前时间在单次查询或重建开始时固定。
 
@@ -85,7 +85,11 @@ Sources 是 backend 的来源分发适配器，source 参数选择提供方。�
 DiscoverySnapshot(ctx context.Context, source, cursor string, limit int) ([]Document, string, error)
 ActivitySnapshot(ctx context.Context, source string, fromDay, toDay time.Time, cursor string, limit int) ([]ActivitySnapshot, string, error)
 CurrentActivity(ctx context.Context, principal, source, activityID string) (ActivitySnapshot, bool, error)
+CurrentBatch(ctx context.Context, user, source string, targets []Target) ([]Document, error)
+CurrentActivities(ctx context.Context, user, source string, ids []string) ([]ActivitySnapshot, error)
 ```
+
+CurrentBatch 与 CurrentActivities 为可选批量扩展接口，每批最多 100 条；未实现时回退到单条接口。单次热门查询首次遇到来源返回 ErrSourceDisabled 后，后续数据库分页直接跳过该来源且不计入扫描配额。
 
 catalog、reviews、favorites 各自实现以下提供方端口。source 由模块固定，不能接受调用方指定其他来源。分页后续请求沿用原窗口、快照版本和上限；来源查询通过公开 Repository/Service 接口提供。
 

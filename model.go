@@ -93,6 +93,18 @@ type Sources interface {
 	CurrentActivity(context.Context, string, string, string) (ActivitySnapshot, bool, error)
 	MyVotes(context.Context, string, string, int) (Votes, error)
 }
+
+// BatchCurrentSource is an optional Sources extension for checking up to 100 targets from one source per call.
+// Unreadable, deleted, or missing targets are omitted or returned with Visible=false.
+type BatchCurrentSource interface {
+	CurrentBatch(ctx context.Context, user, source string, targets []Target) ([]Document, error)
+}
+
+// BatchActivitySource is an optional Sources extension for checking up to 100 daily activity IDs from one source per call.
+// Unreadable or missing snapshots are omitted or returned with Visible=false; disabled sources return ErrSourceDisabled.
+type BatchActivitySource interface {
+	CurrentActivities(ctx context.Context, user, source string, ids []string) ([]ActivitySnapshot, error)
+}
 type Config struct {
 	QueryTimeout       time.Duration
 	HeatWindow         time.Duration
