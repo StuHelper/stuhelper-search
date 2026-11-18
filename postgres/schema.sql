@@ -35,6 +35,8 @@ BEGIN
  END IF;
 END $$;
 CREATE INDEX IF NOT EXISTS search_visible_key ON search.documents(source,id) WHERE (data->>'visible')::boolean;
+CREATE INDEX IF NOT EXISTS search_documents_visible_c_order ON search.documents(source COLLATE "C", id COLLATE "C") WHERE (data->>'visible')::boolean;
+CREATE INDEX IF NOT EXISTS search_documents_kind_c_order ON search.documents((data->'target'->>'kind'), source COLLATE "C", id COLLATE "C") WHERE (data->>'visible')::boolean;
 CREATE TABLE IF NOT EXISTS search.inbox (
  source text NOT NULL, id text NOT NULL, event_type text NOT NULL DEFAULT '',
  digest text NOT NULL, received_at timestamptz NOT NULL DEFAULT now(),
@@ -57,7 +59,13 @@ BEGIN
  END IF;
 END $$;
 CREATE INDEX IF NOT EXISTS search_inbox_received_at ON search.inbox(received_at, source, event_type, id);
-CREATE TABLE IF NOT EXISTS search.state (id boolean PRIMARY KEY DEFAULT true CHECK(id), ready boolean NOT NULL);
+CREATE TABLE IF NOT EXISTS search.state (id boolean PRIMARY KEY DEFAULT true CHECK(id), ready boolean NOT NULL, cursor_key bytea);
+DO $$
+BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='search.state'::regclass AND attname='cursor_key' AND NOT attisdropped) THEN
+  ALTER TABLE search.state ADD COLUMN cursor_key bytea;
+ END IF;
+END $$;
 INSERT INTO search.state(id,ready) VALUES(true,false) ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS search.activities (
  source text NOT NULL CHECK(source IN ('catalog','reviews','favorites')),
@@ -66,6 +74,7 @@ CREATE TABLE IF NOT EXISTS search.activities (
  data jsonb NOT NULL, PRIMARY KEY(source,id), UNIQUE(source,kind,object_id,day)
 );
 CREATE INDEX IF NOT EXISTS search_activity_window ON search.activities(kind,day);
+CREATE INDEX IF NOT EXISTS search_activities_by_day_c ON search.activities(kind, day, source COLLATE "C", id COLLATE "C") WHERE (data->>'visible')::boolean;
 DO $$
 DECLARE
  tbl text;

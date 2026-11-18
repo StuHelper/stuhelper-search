@@ -28,6 +28,7 @@ scenario_tests:
     - validation_inbox_test.go#TestUnicodeTargetRoundTripsThroughSearchAndActivity
     - integration_test.go#TestVisibilityPaginationAndHotTargets
     - httpapi_contract_test.go#TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed
+    - index_collation_cursor_test.go#TestIndexOrderUnicodeCollationOpaqueCursorAndSchoolQueryRules
   DS-04:
     - integration_test.go#TestMyVotesHTTPAndTimeout
     - httpapi_contract_test.go#TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed
@@ -51,3 +52,4 @@ scenario_tests:
   DS-SCHOOL-01:
     - school_search_test.go#TestSchoolSearchCodesNamesAliasesCurrentRightsAndRebuild
     - school_search_test.go#TestSchoolProjectionMigrationPreservesExistingDocuments
+    - index_collation_cursor_test.go#TestIndexOrderUnicodeCollationOpaqueCursorAndSchoolQueryRules
