@@ -310,6 +310,10 @@ func (r *Repository) Rebuild(ctx context.Context, load func(func([]s.Document) e
 }
 
 func (r *Repository) RebuildWindow(ctx context.Context, from, to time.Time, load func(func([]s.Document) error, func([]s.ActivitySnapshot) error) error) error {
+	return r.RebuildWindowAt(ctx, time.Time{}, from, to, load)
+}
+
+func (r *Repository) RebuildWindowAt(ctx context.Context, rebuiltAt, from, to time.Time, load func(func([]s.Document) error, func([]s.ActivitySnapshot) error) error) error {
 	tx, e := r.DB.BeginTx(ctx, nil)
 	if e != nil {
 		return safe(e)
@@ -338,10 +342,74 @@ func (r *Repository) RebuildWindow(ctx context.Context, from, to time.Time, load
 	if e != nil {
 		return safe(e)
 	}
-	if _, e = tx.ExecContext(ctx, "UPDATE search.state SET ready=true WHERE id"); e != nil {
+	if rebuiltAt.IsZero() {
+		_, e = tx.ExecContext(ctx, "UPDATE search.state SET ready=true, rebuilt_at=now() WHERE id")
+	} else {
+		_, e = tx.ExecContext(ctx, "UPDATE search.state SET ready=true, rebuilt_at=$1, activity_from=$2, activity_to=$3 WHERE id", rebuiltAt.UTC(), from.UTC().Format(time.DateOnly), to.UTC().Format(time.DateOnly))
+	}
+	if e != nil {
 		return safe(e)
 	}
 	return safe(tx.Commit())
+}
+
+func (r *Repository) Status(ctx context.Context) (s.Status, error) {
+	out := s.Status{
+		Documents:  map[string]s.SourceCounts{},
+		Activities: map[string]s.SourceCounts{},
+	}
+	var rebuiltAt sql.NullTime
+	var actFrom, actTo sql.NullString
+	e := r.DB.QueryRowContext(ctx, `SELECT ready, rebuilt_at, activity_from::text, activity_to::text FROM search.state WHERE id`).Scan(&out.Ready, &rebuiltAt, &actFrom, &actTo)
+	if e != nil {
+		return s.Status{}, safe(e)
+	}
+	if rebuiltAt.Valid {
+		t := rebuiltAt.Time.UTC()
+		out.RebuiltAt = &t
+	}
+	if actFrom.Valid {
+		out.ActivityWindowFrom = actFrom.String
+	}
+	if actTo.Valid {
+		out.ActivityWindowTo = actTo.String
+	}
+	docRows, e := r.DB.QueryContext(ctx, `SELECT source, count(*), count(*) FILTER (WHERE (data->>'visible')::boolean) FROM search.documents GROUP BY source`)
+	if e != nil {
+		return s.Status{}, safe(e)
+	}
+	defer docRows.Close()
+	for docRows.Next() {
+		var src string
+		var c s.SourceCounts
+		if e = docRows.Scan(&src, &c.Total, &c.Visible); e != nil {
+			return s.Status{}, safe(e)
+		}
+		out.Documents[src] = c
+	}
+	if e = docRows.Err(); e != nil {
+		return s.Status{}, safe(e)
+	}
+	actRows, e := r.DB.QueryContext(ctx, `SELECT source, count(*), count(*) FILTER (WHERE (data->>'visible')::boolean) FROM search.activities GROUP BY source`)
+	if e != nil {
+		return s.Status{}, safe(e)
+	}
+	defer actRows.Close()
+	for actRows.Next() {
+		var src string
+		var c s.SourceCounts
+		if e = actRows.Scan(&src, &c.Total, &c.Visible); e != nil {
+			return s.Status{}, safe(e)
+		}
+		out.Activities[src] = c
+	}
+	if e = actRows.Err(); e != nil {
+		return s.Status{}, safe(e)
+	}
+	if e = r.DB.QueryRowContext(ctx, `SELECT count(*) FROM search.inbox`).Scan(&out.InboxCount); e != nil {
+		return s.Status{}, safe(e)
+	}
+	return out, nil
 }
 func (r *Repository) CheckRuntime(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)

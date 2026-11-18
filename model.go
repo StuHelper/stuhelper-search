@@ -101,4 +101,58 @@ type Config struct {
 	MinimumHeatSamples int
 	CursorKey          []byte
 	Now                func() time.Time
+	Observer           Observer
+}
+
+// Observation records sanitized runtime diagnostics, never raw query text or user identifiers.
+type Observation struct {
+	Operation     string
+	Source        string
+	ErrorCode     string
+	Duration      time.Duration
+	Scanned       int
+	RevisionSkips int
+}
+
+type Observer interface {
+	ObserveSearch(Observation)
+}
+
+type ObserverFunc func(Observation)
+
+func (f ObserverFunc) ObserveSearch(o Observation) {
+	if f != nil {
+		f(o)
+	}
+}
+
+type SourceCounts struct {
+	Total   int64 `json:"total"`
+	Visible int64 `json:"visible"`
+}
+
+type Status struct {
+	Ready              bool                    `json:"ready"`
+	RebuiltAt          *time.Time              `json:"rebuilt_at,omitempty"`
+	ActivityWindowFrom string                  `json:"activity_window_from,omitempty"`
+	ActivityWindowTo   string                  `json:"activity_window_to,omitempty"`
+	Documents          map[string]SourceCounts `json:"documents"`
+	Activities         map[string]SourceCounts `json:"activities"`
+	InboxCount         int64                   `json:"inbox_count"`
+}
+
+type StatusReader interface {
+	Status(context.Context) (Status, error)
+}
+
+type CleanupOptions struct {
+	InboxBefore       time.Time
+	ActivityBeforeDay string
+	Limit             int
+	Timeout           time.Duration
+}
+
+type CleanupResult struct {
+	DeletedInbox      int64 `json:"deleted_inbox"`
+	DeletedActivities int64 `json:"deleted_activities"`
 }
