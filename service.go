@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -393,6 +394,24 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 	if e != nil {
 		return out, e
 	}
+	var afterScore float64
+	var afterKey string
+	if after != "" {
+		scorePart, keyPart, ok := strings.Cut(after, ":")
+		if !ok {
+			return out, ErrInput
+		}
+		parsedScore, err := strconv.ParseFloat(scorePart, 64)
+		if err != nil || math.IsNaN(parsedScore) || math.IsInf(parsedScore, 0) || parsedScore < 0 {
+			return out, ErrInput
+		}
+		src, id, ok := strings.Cut(keyPart, "/")
+		if !ok || src != "catalog" || !searchText(id, 200) || id == "" {
+			return out, ErrInput
+		}
+		afterScore = parsedScore
+		afterKey = keyPart
+	}
 	type ranked struct {
 		d       Document
 		score   float64
@@ -469,13 +488,12 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 		}
 		return rows[i].score > rows[j].score
 	})
-	passed := after == ""
 	for _, r := range rows {
-		token := fmt.Sprintf("%.17g:%s", r.score, key(r.d))
-		if !passed {
-			passed = token == after
+		k := key(r.d)
+		if after != "" && !(r.score < afterScore || (r.score == afterScore && k > afterKey)) {
 			continue
 		}
+		token := fmt.Sprintf("%.17g:%s", r.score, k)
 		out.Items = append(out.Items, documentItem(r.d))
 		if len(out.Items) == limit {
 			next, err := s.sealCursor(ctx, scope, user, token)
@@ -485,9 +503,6 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 			out.NextCursor = next
 			break
 		}
-	}
-	if !passed {
-		return Page{}, ErrInput
 	}
 	return out, nil
 }

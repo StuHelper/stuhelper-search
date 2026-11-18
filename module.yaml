@@ -29,9 +29,11 @@ scenario_tests:
     - integration_test.go#TestVisibilityPaginationAndHotTargets
     - httpapi_contract_test.go#TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed
     - index_collation_cursor_test.go#TestIndexOrderUnicodeCollationOpaqueCursorAndSchoolQueryRules
+    - sdk_contract_test.go#TestSDKEndToEndContractAndPopularDynamicPagination
   DS-04:
     - integration_test.go#TestMyVotesHTTPAndTimeout
     - httpapi_contract_test.go#TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed
+    - sdk_contract_test.go#TestSDKEndToEndContractAndPopularDynamicPagination
   DS-05:
     - activity_test.go#TestHeatWeightsWindowAndTeachers
     - activity_test.go#TestActivityOwnership
@@ -49,6 +51,7 @@ scenario_tests:
     - rebuild_window_test.go#TestRebuildPreservesOutOfWindowActivitiesBatchesWritesAndDetectsCycles
     - validation_inbox_test.go#TestUTF8NullValidationUnicodeLengthsAndInboxCanonicalDedup
     - migration_runtime_test.go#TestIdempotentMigrateLockFreeAndStrictRuntimePrivilegeChecks
+    - sdk_contract_test.go#TestSharedAdvisoryLockAllowsConcurrentMultiSourceWrites
 
   DS-SCHOOL-01:
     - school_search_test.go#TestSchoolSearchCodesNamesAliasesCurrentRightsAndRebuild
