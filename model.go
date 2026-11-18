@@ -95,6 +95,7 @@ type Sources interface {
 }
 type Config struct {
 	QueryTimeout       time.Duration
+	RebuildTimeout     time.Duration
 	HeatWindow         time.Duration
 	HeatWeights        [4]float64
 	MinimumHeatSamples int
