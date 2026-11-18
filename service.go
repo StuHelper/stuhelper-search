@@ -2,6 +2,9 @@ package search
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -15,14 +18,19 @@ import (
 	"unicode/utf8"
 )
 
+type cursorKeyProvider interface {
+	CursorKey(context.Context) ([]byte, error)
+}
+
 type Service struct {
-	repo    Repository
-	sources Sources
-	config  Config
+	repo        Repository
+	sources     Sources
+	config      Config
+	fallbackKey []byte
 }
 
 func New(repo Repository, sources Sources, c Config) (*Service, error) {
-	if repo == nil || sources == nil || c.QueryTimeout <= 0 || c.QueryTimeout > 30*time.Second || c.HeatWindow <= 0 || c.HeatWindow > 366*24*time.Hour || c.MinimumHeatSamples < 1 {
+	if repo == nil || sources == nil || c.QueryTimeout <= 0 || c.QueryTimeout > 30*time.Second || c.HeatWindow <= 0 || c.HeatWindow > 366*24*time.Hour || c.MinimumHeatSamples < 1 || (len(c.CursorKey) != 0 && len(c.CursorKey) != 32) {
 		return nil, ErrInput
 	}
 	positive := false
@@ -38,7 +46,14 @@ func New(repo Repository, sources Sources, c Config) (*Service, error) {
 	if c.Now == nil {
 		c.Now = time.Now
 	}
-	return &Service{repo, sources, c}, nil
+	fallback := make([]byte, 32)
+	if len(c.CursorKey) == 32 {
+		c.CursorKey = append([]byte(nil), c.CursorKey...)
+		copy(fallback, c.CursorKey)
+	} else if _, err := rand.Read(fallback); err != nil {
+		return nil, ErrUnavailable
+	}
+	return &Service{repo: repo, sources: sources, config: c, fallbackKey: fallback}, nil
 }
 func validTarget(t Target) bool {
 	return len(t.ID) > 0 && len(t.ID) <= 200 && !strings.ContainsRune(t.ID, 0) && ((t.Source == "catalog" && (t.Kind == "school" || t.Kind == "course" || t.Kind == "teacher")) || (t.Source == "reviews" && t.Kind == "review") || (t.Source == "resources" && t.Kind == "resource"))
@@ -139,16 +154,75 @@ func (s *Service) Rebuild(ctx context.Context) error {
 }
 func key(d Document) string  { return d.Target.Source + "/" + d.Target.ID }
 func encode(v string) string { return base64.RawURLEncoding.EncodeToString([]byte(v)) }
-func decode(v string) (string, error) {
-	if len(v) > 1024 {
-		return "", ErrInput
+
+func (s *Service) resolveCursorKey(ctx context.Context) ([]byte, error) {
+	if len(s.config.CursorKey) == 32 {
+		return s.config.CursorKey, nil
 	}
-	b, e := base64.RawURLEncoding.DecodeString(v)
-	if e != nil {
-		return "", ErrInput
+	if p, ok := s.repo.(cursorKeyProvider); ok {
+		return p.CursorKey(ctx)
 	}
-	return string(b), nil
+	return s.fallbackKey, nil
 }
+
+// sealCursor encrypts pagination state with AES-256-GCM bound to (scope, user) so restricted IDs never leak.
+func (s *Service) sealCursor(ctx context.Context, scope, user, plain string) (string, error) {
+	rawKey, err := s.resolveCursorKey(ctx)
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(rawKey)
+	if err != nil {
+		return "", ErrUnavailable
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", ErrUnavailable
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", ErrUnavailable
+	}
+	aad := []byte(scope + "\x00" + user)
+	sealed := gcm.Seal(nonce, nonce, []byte(plain), aad)
+	return base64.RawURLEncoding.EncodeToString(sealed), nil
+}
+
+func (s *Service) openCursor(ctx context.Context, scope, user, token string) (string, error) {
+	if token == "" {
+		return "", nil
+	}
+	if len(token) > 1024 {
+		return "", ErrInput
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil || len(raw) < 12+16 {
+		return "", ErrInput
+	}
+	rawKey, err := s.resolveCursorKey(ctx)
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(rawKey)
+	if err != nil {
+		return "", ErrUnavailable
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil || len(raw) < gcm.NonceSize()+gcm.Overhead() {
+		return "", ErrInput
+	}
+	aad := []byte(scope + "\x00" + user)
+	plain, err := gcm.Open(nil, raw[:gcm.NonceSize()], raw[gcm.NonceSize():], aad)
+	if err != nil {
+		return "", ErrInput
+	}
+	out := string(plain)
+	if !utf8.ValidString(out) || strings.ContainsRune(out, 0) {
+		return "", ErrInput
+	}
+	return out, nil
+}
+
 func (s *Service) current(ctx context.Context, user string, d Document) (Document, bool, error) {
 	live, ok, e := s.sources.Current(ctx, user, d.Target)
 	if e != nil {
@@ -177,19 +251,29 @@ func (s *Service) Search(ctx context.Context, user, q, kind, cursor string, limi
 	if utf8.RuneCountInString(q) > 200 || limit < 1 || limit > 100 || kind != "" && kind != "school" && kind != "course" && kind != "teacher" && kind != "review" && kind != "resource" {
 		return out, ErrInput
 	}
-	after, e := decode(cursor)
+	started := time.Now()
+	softBudget := s.config.QueryTimeout * 3 / 4
+	ctx, cancel := context.WithTimeout(ctx, s.config.QueryTimeout)
+	defer cancel()
+	after, e := s.openCursor(ctx, "search", user, cursor)
 	if e != nil {
 		return out, e
 	}
-	ctx, cancel := context.WithTimeout(ctx, s.config.QueryTimeout)
-	defer cancel()
-	// The cursor tracks examined candidates, so invisible entries cannot stall pagination.
+	// The cursor tracks examined candidates and stops before QueryTimeout so restricted blocks cannot stall pagination.
 	for scanned := 0; scanned < 10000; {
+		if scanned > 0 && time.Since(started) >= softBudget {
+			next, err := s.sealCursor(ctx, "search", user, after)
+			return Page{Items: out.Items, NextCursor: next}, err
+		}
 		docs, e := s.repo.Candidates(ctx, Filter{Query: q, Kind: kind, After: after, Limit: 100})
 		if e != nil {
 			return out, e
 		}
-		for _, d := range docs {
+		for i, d := range docs {
+			if scanned > 0 && time.Since(started) >= softBudget {
+				next, err := s.sealCursor(ctx, "search", user, after)
+				return Page{Items: out.Items, NextCursor: next}, err
+			}
 			scanned++
 			after = key(d)
 			live, ok, e := s.current(ctx, user, d)
@@ -200,7 +284,19 @@ func (s *Service) Search(ctx context.Context, user, q, kind, cursor string, limi
 				out.Items = append(out.Items, documentItem(live))
 			}
 			if len(out.Items) == limit {
-				out.NextCursor = encode(after)
+				next, err := s.sealCursor(ctx, "search", user, after)
+				if err != nil {
+					return Page{}, err
+				}
+				out.NextCursor = next
+				return out, nil
+			}
+			if scanned == 10000 && (i < len(docs)-1 || len(docs) == 100) {
+				next, err := s.sealCursor(ctx, "search", user, after)
+				if err != nil {
+					return Page{}, err
+				}
+				out.NextCursor = next
 				return out, nil
 			}
 		}
@@ -208,7 +304,11 @@ func (s *Service) Search(ctx context.Context, user, q, kind, cursor string, limi
 			return out, nil
 		}
 	}
-	out.NextCursor = encode(after)
+	next, e := s.sealCursor(ctx, "search", user, after)
+	if e != nil {
+		return Page{}, e
+	}
+	out.NextCursor = next
 	return out, nil
 }
 func (s *Service) MyVotes(ctx context.Context, user, cursor string, limit int) (Votes, error) {
@@ -253,12 +353,13 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 	if limit < 1 || limit > 100 || (kind != "course" && kind != "teacher") {
 		return out, ErrInput
 	}
-	after, e := decode(cursor)
+	ctx, cancel := context.WithTimeout(ctx, s.config.QueryTimeout)
+	defer cancel()
+	scope := "popular:" + kind
+	after, e := s.openCursor(ctx, scope, user, cursor)
 	if e != nil {
 		return out, e
 	}
-	ctx, cancel := context.WithTimeout(ctx, s.config.QueryTimeout)
-	defer cancel()
 	type ranked struct {
 		d       Document
 		score   float64
@@ -343,7 +444,11 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 		}
 		out.Items = append(out.Items, documentItem(r.d))
 		if len(out.Items) == limit {
-			out.NextCursor = encode(token)
+			next, err := s.sealCursor(ctx, scope, user, token)
+			if err != nil {
+				return Page{}, err
+			}
+			out.NextCursor = next
 			break
 		}
 	}

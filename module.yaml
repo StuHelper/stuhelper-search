@@ -26,6 +26,7 @@ scenario_tests:
     - course_search_test.go#TestCourseSearchFieldsValidateAtEventBoundary
   DS-01:
     - integration_test.go#TestVisibilityPaginationAndHotTargets
+    - index_collation_cursor_test.go#TestIndexOrderUnicodeCollationOpaqueCursorAndSchoolQueryRules
   DS-04:
     - integration_test.go#TestMyVotesHTTPAndTimeout
   DS-05:
@@ -43,3 +44,4 @@ scenario_tests:
   DS-SCHOOL-01:
     - school_search_test.go#TestSchoolSearchCodesNamesAliasesCurrentRightsAndRebuild
     - school_search_test.go#TestSchoolProjectionMigrationPreservesExistingDocuments
+    - index_collation_cursor_test.go#TestIndexOrderUnicodeCollationOpaqueCursorAndSchoolQueryRules

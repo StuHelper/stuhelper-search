@@ -98,5 +98,6 @@ type Config struct {
 	HeatWindow         time.Duration
 	HeatWeights        [4]float64
 	MinimumHeatSamples int
+	CursorKey          []byte
 	Now                func() time.Time
 }

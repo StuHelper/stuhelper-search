@@ -47,14 +47,18 @@ func (r *Repository) ApplyActivity(ctx context.Context, event s.ActivityEvent, d
 	return safe(tx.Commit())
 }
 func (r *Repository) Activities(ctx context.Context, f s.ActivityFilter) ([]s.ActivitySnapshot, error) {
-	if f.Limit < 1 || f.Limit > 100 {
+	afterSource, afterID, ok := splitAfter(f.After)
+	if !ok || f.Limit < 1 || f.Limit > 100 {
 		return nil, s.ErrInput
 	}
 	var ready bool
-	if e := r.DB.QueryRowContext(ctx, "SELECT ready FROM search.state WHERE id").Scan(&ready); e != nil || !ready {
+	if e := r.DB.QueryRowContext(ctx, "SELECT ready FROM search.state WHERE id").Scan(&ready); e != nil {
+		return nil, safe(e)
+	}
+	if !ready {
 		return nil, s.ErrUnavailable
 	}
-	rows, e := r.DB.QueryContext(ctx, `SELECT data FROM search.activities WHERE kind=$1 AND day>=$2 AND day<$3 AND source||'/'||id>$4 AND (data->>'visible')::boolean ORDER BY source||'/'||id LIMIT $5`, f.Kind, f.From, f.To, f.After, f.Limit)
+	rows, e := r.DB.QueryContext(ctx, `SELECT data FROM search.activities WHERE kind=$1 AND day>=$2 AND day<$3 AND (source COLLATE "C", id COLLATE "C") > ($4 COLLATE "C", $5 COLLATE "C") AND (data->>'visible')::boolean ORDER BY source COLLATE "C", id COLLATE "C" LIMIT $6`, f.Kind, f.From, f.To, afterSource, afterID, f.Limit)
 	if e != nil {
 		return nil, safe(e)
 	}
