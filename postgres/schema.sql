@@ -37,6 +37,14 @@ END $$;
 CREATE INDEX IF NOT EXISTS search_visible_key ON search.documents(source,id) WHERE (data->>'visible')::boolean;
 CREATE INDEX IF NOT EXISTS search_documents_visible_c_order ON search.documents(source COLLATE "C", id COLLATE "C") WHERE (data->>'visible')::boolean;
 CREATE INDEX IF NOT EXISTS search_documents_kind_c_order ON search.documents((data->'target'->>'kind'), source COLLATE "C", id COLLATE "C") WHERE (data->>'visible')::boolean;
+DO $$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS pg_trgm;
+  EXECUTE 'CREATE INDEX IF NOT EXISTS search_documents_title_trgm ON search.documents USING gin (lower(normalize(COALESCE(data->>''title'',''''), NFKC) COLLATE "pg_c_utf8") gin_trgm_ops) WHERE (data->>''visible'')::boolean';
+EXCEPTION WHEN insufficient_privilege OR undefined_file OR feature_not_supported THEN
+  NULL;
+END
+$$;
 CREATE TABLE IF NOT EXISTS search.inbox (
  source text NOT NULL, id text NOT NULL, event_type text NOT NULL DEFAULT '',
  digest text NOT NULL, received_at timestamptz NOT NULL DEFAULT now(),

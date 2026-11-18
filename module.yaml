@@ -24,6 +24,7 @@ scenario_tests:
   DS-COURSE-01:
     - course_search_test.go#TestCourseSearchIncludesCurrentFormerAndEnglishNames
     - course_search_test.go#TestCourseSearchFieldsValidateAtEventBoundary
+    - relevance_search_test.go#TestMultiTermNFKCTeacherAliasesAndRelevanceRanking
   DS-01:
     - validation_inbox_test.go#TestUnicodeTargetRoundTripsThroughSearchAndActivity
     - integration_test.go#TestVisibilityPaginationAndHotTargets
