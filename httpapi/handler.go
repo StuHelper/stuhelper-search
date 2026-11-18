@@ -109,6 +109,10 @@ func fail(w http.ResponseWriter, r *http.Request, e error) {
 	case errors.Is(e, s.ErrNotFound):
 		code = http.StatusNotFound
 		name = "not_found"
+	case errors.Is(e, s.ErrIndexBuilding):
+		code = 503
+		name = "index_building"
+		w.Header().Set("Retry-After", "10")
 	case errors.Is(e, context.Canceled) && r != nil && errors.Is(r.Context().Err(), context.Canceled):
 		// Client aborted the in-flight request (e.g. AbortController); avoid polluting 5xx metrics.
 		code = 499
@@ -116,6 +120,8 @@ func fail(w http.ResponseWriter, r *http.Request, e error) {
 	case errors.Is(e, context.DeadlineExceeded) && (r == nil || !errors.Is(r.Context().Err(), context.Canceled)):
 		code = http.StatusGatewayTimeout
 		name = "timeout"
+	default:
+		w.Header().Set("Retry-After", "5")
 	}
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(map[string]string{"code": name})

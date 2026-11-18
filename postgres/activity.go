@@ -48,7 +48,7 @@ func (r *Repository) Activities(ctx context.Context, f s.ActivityFilter) ([]s.Ac
 		return nil, safe(e)
 	}
 	if !ready {
-		return nil, s.ErrUnavailable
+		return nil, s.ErrIndexBuilding
 	}
 	var rows *sql.Rows
 	var e error

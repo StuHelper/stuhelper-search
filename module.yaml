@@ -29,6 +29,7 @@ scenario_tests:
     - integration_test.go#TestVisibilityPaginationAndHotTargets
     - httpapi_contract_test.go#TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed
     - index_collation_cursor_test.go#TestIndexOrderUnicodeCollationOpaqueCursorAndSchoolQueryRules
+    - error_window_test.go#TestErrorCodeEnumRetryAfterAndPopularWindowDays
   DS-04:
     - integration_test.go#TestMyVotesHTTPAndTimeout
     - httpapi_contract_test.go#TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed
