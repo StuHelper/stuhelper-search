@@ -267,7 +267,7 @@ type Votes struct {
 
 // SearchParams defines parameters for Search.
 type SearchParams struct {
-	// Q 检索关键词，去除首尾空白后最长 200 个字符；省略或为空时按默认顺序浏览可见条目。
+	// Q 检索词最多 200 个字符。执行 NFKC 规范化，拆分至多五个词元组合匹配；非空查询按相关性排序。学校代码仅精确匹配或匹配允许的五位后缀，名称与登记别名可匹配数字子串。
 	Q *string `form:"q,omitempty" json:"q,omitempty"`
 
 	// Kind 限定检索的目标类型；省略时检索全部可见类型。
