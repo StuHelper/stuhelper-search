@@ -54,7 +54,7 @@ Service.Consume 接收 CloudEvents 1.0，source 为 catalog、reviews 或 resour
 
 metrics 字段值为 0–1000000000 的整数，禁止负值和来源未拥有的字段，即使越权字段值为 0 也拒绝。Schema 的三个分支同时约束封套和载荷的来源。运行时还校验真实日期、规范活动 ID 和封套一致性。
 
-CurrentActivity 按请求人检查来源活动当前可见性与修订，Current 再检查目标当前权限。修订不匹配的快照暂停计入热度。来源明确未启用时返回 ErrSourceDisabled，该来源贡献为零；超时、查询失败和格式错误返回暂不可用。
+CurrentActivity 按请求人检查来源活动当前可见性与修订，Current 再检查目标当前权限。来源活动可见且 `live.Revision >= d.Revision` 时采用来源最新计数，不可见或 `live.Revision < d.Revision` 的快照排除计入。来源明确未启用时返回 ErrSourceDisabled，该来源贡献为零；超时、查询失败和格式错误返回暂不可用。
 
 重建先读取 catalog、reviews、resources 的 DiscoverySnapshot，再读取 catalog、reviews、favorites 的窗口内 ActivitySnapshot。每批最多 100 条，来源游标必须保持一致性快照、前进且无遗漏。来源首次返回 ErrSourceDisabled 时跳过该来源。
 

@@ -264,3 +264,41 @@ func TestActivitySnapshotPagination(t *testing.T) {
 		t.Fatal(count, e)
 	}
 }
+
+// DS-05: Newer live activity revisions use authoritative source metrics without dropping hot courses, while stale or hidden revisions remain excluded.
+func TestPopularCountsNewerLiveActivityRevisionWithoutDroppingHotTargets(t *testing.T) {
+	svc, _, f, _ := setup(t)
+
+	add(t, svc, f, doc("catalog", "course", "hot"))
+	add(t, svc, f, doc("catalog", "course", "steady"))
+
+	hotAct := activity("catalog", "course", "hot", "2026-11-09", map[string]int64{"views": 5})
+	steadyAct := activity("catalog", "course", "steady", "2026-11-09", map[string]int64{"views": 10})
+	addActivity(t, svc, f, hotAct)
+	addActivity(t, svc, f, steadyAct)
+
+	// Simulate peak traffic: source advances hotAct to revision 4 (views=25) before async relay updates search.activities.
+	liveAhead := hotAct
+	liveAhead.Revision = 4
+	liveAhead.Metrics = map[string]int64{"views": 25}
+	f.activities[liveAhead.Source+"/"+liveAhead.ID] = liveAhead
+	expectPopular(t, svc, "course", "hot", "steady")
+
+	// Immediate visibility withdrawal at revision 5 still hides the snapshot without waiting for relay.
+	liveHidden := liveAhead
+	liveHidden.Revision = 5
+	liveHidden.Visible = false
+	f.activities[liveHidden.Source+"/"+liveHidden.ID] = liveHidden
+	expectPopular(t, svc, "course", "steady")
+
+	// Regression guard: if projection has revision 3 while source returns stale revision 2, snapshot is excluded.
+	projAhead := hotAct
+	projAhead.Revision = 3
+	projAhead.Metrics = map[string]int64{"views": 30}
+	addActivity(t, svc, f, projAhead)
+	staleLive := hotAct
+	staleLive.Revision = 2
+	staleLive.Metrics = map[string]int64{"views": 30}
+	f.activities[staleLive.Source+"/"+staleLive.ID] = staleLive
+	expectPopular(t, svc, "course", "steady")
+}
