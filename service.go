@@ -367,7 +367,7 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 	}
 	scores := map[Target]*ranked{}
 	from, to := s.activityWindow()
-	f := ActivityFilter{Kind: kind, From: from, To: to, Limit: 100}
+	f := ActivityFilter{Kind: kind, From: from, To: to, Limit: 100, AfterDay: from.UTC().Format(time.DateOnly)}
 	for scanned := 0; ; {
 		docs, e := s.repo.Activities(ctx, f)
 		if e != nil {
@@ -379,6 +379,7 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 				return out, ErrUnavailable
 			}
 			f.After = d.Source + "/" + d.ID
+			f.AfterDay = d.Day
 			live, ok, e := s.sources.CurrentActivity(ctx, user, d.Source, d.ID)
 			if errors.Is(e, ErrSourceDisabled) {
 				continue

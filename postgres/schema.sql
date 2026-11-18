@@ -24,7 +24,6 @@ CREATE TABLE IF NOT EXISTS search.inbox (
 CREATE TABLE IF NOT EXISTS search.state (id boolean PRIMARY KEY DEFAULT true CHECK(id), ready boolean NOT NULL, cursor_key bytea);
 ALTER TABLE search.state ADD COLUMN IF NOT EXISTS cursor_key bytea;
 INSERT INTO search.state(id,ready) VALUES(true,false) ON CONFLICT DO NOTHING;
-UPDATE search.state SET cursor_key = sha256((random()::text || clock_timestamp()::text || pg_backend_pid()::text)::bytea) WHERE id AND cursor_key IS NULL;
 CREATE TABLE IF NOT EXISTS search.activities (
  source text NOT NULL CHECK(source IN ('catalog','reviews','favorites')),
  id text NOT NULL, kind text NOT NULL CHECK(kind IN ('course','teacher')),
@@ -32,6 +31,6 @@ CREATE TABLE IF NOT EXISTS search.activities (
  data jsonb NOT NULL, PRIMARY KEY(source,id), UNIQUE(source,kind,object_id,day)
 );
 CREATE INDEX IF NOT EXISTS search_activity_window ON search.activities(kind,day);
-CREATE INDEX IF NOT EXISTS search_activities_window_c_order ON search.activities(kind, source COLLATE "C", id COLLATE "C", day) WHERE (data->>'visible')::boolean;
+CREATE INDEX IF NOT EXISTS search_activities_by_day_c ON search.activities(kind, day, source COLLATE "C", id COLLATE "C") WHERE (data->>'visible')::boolean;
 REVOKE ALL ON SCHEMA search FROM PUBLIC;
 REVOKE ALL ON ALL TABLES IN SCHEMA search FROM PUBLIC;

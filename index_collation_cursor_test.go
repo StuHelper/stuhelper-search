@@ -102,7 +102,7 @@ func TestIndexOrderUnicodeCollationOpaqueCursorAndSchoolQueryRules(t *testing.T)
 	}
 	for _, explainSQL := range []string{
 		`EXPLAIN SELECT data FROM search.documents WHERE (data->>'visible')::boolean AND (source COLLATE "C", id COLLATE "C") > ('catalog' COLLATE "C", '' COLLATE "C") AND data->'target'->>'kind' = 'school' ORDER BY source COLLATE "C", id COLLATE "C" LIMIT 100`,
-		`EXPLAIN SELECT data FROM search.activities WHERE kind = 'course' AND day >= '2026-11-02' AND day < '2026-11-10' AND (source COLLATE "C", id COLLATE "C") > ('' COLLATE "C", '' COLLATE "C") AND (data->>'visible')::boolean ORDER BY source COLLATE "C", id COLLATE "C" LIMIT 100`,
+		`EXPLAIN SELECT data FROM search.activities WHERE kind = 'course' AND day >= '2026-11-02' AND day < '2026-11-10' AND (day, source COLLATE "C", id COLLATE "C") > ('2026-11-02'::date, '' COLLATE "C", '' COLLATE "C") AND (data->>'visible')::boolean ORDER BY day, source COLLATE "C", id COLLATE "C" LIMIT 100`,
 	} {
 		rows, err := tx.QueryContext(ctx, explainSQL)
 		if err != nil {
@@ -118,6 +118,9 @@ func TestIndexOrderUnicodeCollationOpaqueCursorAndSchoolQueryRules(t *testing.T)
 		}
 		rows.Close()
 		plan := strings.Join(planLines, "\n")
+		if strings.Contains(explainSQL, "search.activities") && (!strings.Contains(plan, "search_activities_by_day_c") || !strings.Contains(plan, "Index Cond:") || !strings.Contains(plan, "day >=")) {
+			t.Fatalf("expected a range scan on the activity window: %s", plan)
+		}
 		if strings.Contains(plan, "Sort Key:") || !strings.Contains(plan, "Index Scan") {
 			t.Fatalf("expected Index Scan without Sort node, got plan:\n%s", plan)
 		}

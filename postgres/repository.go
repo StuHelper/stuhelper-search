@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	_ "embed"
 	"encoding/json"
@@ -65,6 +66,13 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		return e
 	}
 	if _, e = tx.ExecContext(ctx, Schema); e != nil {
+		return e
+	}
+	key := make([]byte, 32)
+	if _, e = rand.Read(key); e != nil {
+		return e
+	}
+	if _, e = tx.ExecContext(ctx, "UPDATE search.state SET cursor_key=$1 WHERE id AND cursor_key IS NULL", key); e != nil {
 		return e
 	}
 	return tx.Commit()

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	s "github.com/StuHelper/stuhelper-search"
+	"time"
 )
 
 func putActivity(ctx context.Context, tx *sql.Tx, d s.ActivitySnapshot, equal bool) error {
@@ -58,7 +59,20 @@ func (r *Repository) Activities(ctx context.Context, f s.ActivityFilter) ([]s.Ac
 	if !ready {
 		return nil, s.ErrUnavailable
 	}
-	rows, e := r.DB.QueryContext(ctx, `SELECT data FROM search.activities WHERE kind=$1 AND day>=$2 AND day<$3 AND (source COLLATE "C", id COLLATE "C") > ($4 COLLATE "C", $5 COLLATE "C") AND (data->>'visible')::boolean ORDER BY source COLLATE "C", id COLLATE "C" LIMIT $6`, f.Kind, f.From, f.To, afterSource, afterID, f.Limit)
+	var rows *sql.Rows
+	var e error
+	if f.AfterDay == "" {
+		rows, e = r.DB.QueryContext(ctx, `SELECT data FROM search.activities WHERE kind=$1 AND day>=$2 AND day<$3 AND (source COLLATE "C", id COLLATE "C") > ($4 COLLATE "C", $5 COLLATE "C") AND (data->>'visible')::boolean ORDER BY source COLLATE "C", id COLLATE "C" LIMIT $6`, f.Kind, f.From, f.To, afterSource, afterID, f.Limit)
+	} else {
+		day, err := time.Parse(time.DateOnly, f.AfterDay)
+		if err != nil || day.Before(f.From.UTC()) || !day.Before(f.To.UTC()) {
+			return nil, s.ErrInput
+		}
+		rows, e = r.DB.QueryContext(ctx, `SELECT data FROM search.activities
+ WHERE kind=$1 AND day >= $2 AND day < $3 AND (data->>'visible')::boolean
+ AND (day,source COLLATE "C",id COLLATE "C") > ($4::date,$5 COLLATE "C",$6 COLLATE "C")
+ ORDER BY day,source COLLATE "C",id COLLATE "C" LIMIT $7`, f.Kind, f.From, f.To, f.AfterDay, afterSource, afterID, f.Limit)
+	}
 	if e != nil {
 		return nil, safe(e)
 	}
