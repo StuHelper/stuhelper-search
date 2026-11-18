@@ -40,7 +40,7 @@ func ActivityID(target Target, day string) string {
 	return target.Kind + "/" + encode(target.ID) + "/" + day
 }
 func ValidateActivity(d ActivitySnapshot) error {
-	if d.Target.Source != "catalog" || !validTarget(d.Target) || d.Revision < 1 || d.ID != ActivityID(d.Target, d.Day) {
+	if d.Target.Source != "catalog" || !validTarget(d.Target) || d.Revision < 1 || !searchText(d.ID, 1086) || d.ID != ActivityID(d.Target, d.Day) {
 		return ErrInput
 	}
 	day, e := time.Parse(time.DateOnly, d.Day)
@@ -70,13 +70,15 @@ func ValidateActivity(d ActivitySnapshot) error {
 	return nil
 }
 func (s *Service) ConsumeActivity(ctx context.Context, e ActivityEvent) error {
-	if e.SpecVersion != "1.0" || e.ID == "" || len(e.ID) > 200 || e.Type != "discovery.activity.v1" || e.Source != e.Data.Source || e.Subject != e.Data.ID || e.Time.IsZero() {
+	if e.SpecVersion != "1.0" || e.ID == "" || !searchText(e.ID, 200) || e.Type != "discovery.activity.v1" || e.Source != e.Data.Source || e.Subject != e.Data.ID || e.Time.IsZero() {
 		return ErrInput
 	}
 	if err := ValidateActivity(e.Data); err != nil {
 		return err
 	}
-	b, err := json.Marshal(e)
+	canonical := e
+	canonical.Time = e.Time.UTC()
+	b, err := json.Marshal(canonical)
 	if err != nil {
 		return ErrInput
 	}

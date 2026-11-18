@@ -17,8 +17,23 @@ ALTER TABLE search.documents ADD CONSTRAINT documents_content_kind CHECK ((
 ) IS TRUE);
 CREATE INDEX IF NOT EXISTS search_visible_key ON search.documents(source,id) WHERE (data->>'visible')::boolean;
 CREATE TABLE IF NOT EXISTS search.inbox (
- source text NOT NULL, id text NOT NULL, digest text NOT NULL, PRIMARY KEY(source,id)
+ source text NOT NULL, id text NOT NULL, event_type text NOT NULL DEFAULT '',
+ digest text NOT NULL, received_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(source,event_type,id)
 );
+ALTER TABLE search.inbox ADD COLUMN IF NOT EXISTS event_type text NOT NULL DEFAULT '';
+ALTER TABLE search.inbox ADD COLUMN IF NOT EXISTS received_at timestamptz NOT NULL DEFAULT now();
+DO $$
+BEGIN
+ IF EXISTS (
+  SELECT 1 FROM pg_constraint
+  WHERE conrelid = 'search.inbox'::regclass AND contype = 'p' AND array_length(conkey, 1) = 2
+ ) THEN
+  ALTER TABLE search.inbox DROP CONSTRAINT inbox_pkey;
+  ALTER TABLE search.inbox ADD PRIMARY KEY (source, event_type, id);
+ END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS search_inbox_received_at ON search.inbox(received_at, source, event_type, id);
 CREATE TABLE IF NOT EXISTS search.state (id boolean PRIMARY KEY DEFAULT true CHECK(id), ready boolean NOT NULL);
 INSERT INTO search.state(id,ready) VALUES(true,false) ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS search.activities (

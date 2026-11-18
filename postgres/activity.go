@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	s "github.com/StuHelper/stuhelper-search"
 )
 
@@ -27,27 +26,19 @@ func (r *Repository) ApplyActivity(ctx context.Context, event s.ActivityEvent, d
 	if e = lock(ctx, tx); e != nil {
 		return safe(e)
 	}
-	var old string
-	e = tx.QueryRowContext(ctx, "SELECT digest FROM search.inbox WHERE source=$1 AND id=$2", event.Source, event.ID).Scan(&old)
-	if e == nil {
-		if old != digest {
-			return s.ErrConflict
-		}
-		return nil
-	}
-	if !errors.Is(e, sql.ErrNoRows) {
-		return safe(e)
+	if seen, err := replayed(ctx, tx, event.Source, event.Type, event.ID, digest, event); seen || err != nil {
+		return err
 	}
 	if e = putActivity(ctx, tx, event.Data, false); e != nil {
 		return safe(e)
 	}
-	if _, e = tx.ExecContext(ctx, "INSERT INTO search.inbox(source,id,digest) VALUES($1,$2,$3)", event.Source, event.ID, digest); e != nil {
+	if _, e = tx.ExecContext(ctx, "INSERT INTO search.inbox(source,event_type,id,digest) VALUES($1,$2,$3,$4)", event.Source, event.Type, event.ID, digest); e != nil {
 		return safe(e)
 	}
 	return safe(tx.Commit())
 }
 func (r *Repository) Activities(ctx context.Context, f s.ActivityFilter) ([]s.ActivitySnapshot, error) {
-	if f.Limit < 1 || f.Limit > 100 {
+	if f.Limit < 1 || f.Limit > 100 || !validDBString(f.Kind) || !validDBString(f.After) {
 		return nil, s.ErrInput
 	}
 	var ready bool
