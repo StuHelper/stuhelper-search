@@ -118,6 +118,16 @@
               }
             }
           },
+          "499": {
+            "description": "cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "503": {
             "description": "unavailable",
             "content": {
@@ -247,6 +257,16 @@
               }
             }
           },
+          "499": {
+            "description": "cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "503": {
             "description": "unavailable",
             "content": {
@@ -354,6 +374,16 @@
                 }
               }
             },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "499": {
+            "description": "cancelled",
             "content": {
               "application/json": {
                 "schema": {

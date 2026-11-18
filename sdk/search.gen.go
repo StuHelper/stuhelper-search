@@ -722,6 +722,8 @@ type SearchResponse struct {
 	JSON404 *Error
 	// JSON405 the response for an HTTP 405 `application/json` response
 	JSON405 *Error
+	// JSON499 the response for an HTTP 499 `application/json` response
+	JSON499 *Error
 	// JSON503 the response for an HTTP 503 `application/json` response
 	JSON503 *Error
 	// JSON504 the response for an HTTP 504 `application/json` response
@@ -753,6 +755,11 @@ func (r SearchResponse) GetJSON404() *Error {
 // GetJSON405 returns the response for an HTTP 405 `application/json` response
 func (r SearchResponse) GetJSON405() *Error {
 	return r.JSON405
+}
+
+// GetJSON499 returns the response for an HTTP 499 `application/json` response
+func (r SearchResponse) GetJSON499() *Error {
+	return r.JSON499
 }
 
 // GetJSON503 returns the response for an HTTP 503 `application/json` response
@@ -812,6 +819,8 @@ type MyVotesResponse struct {
 	JSON404 *Error
 	// JSON405 the response for an HTTP 405 `application/json` response
 	JSON405 *Error
+	// JSON499 the response for an HTTP 499 `application/json` response
+	JSON499 *Error
 	// JSON503 the response for an HTTP 503 `application/json` response
 	JSON503 *Error
 	// JSON504 the response for an HTTP 504 `application/json` response
@@ -843,6 +852,11 @@ func (r MyVotesResponse) GetJSON404() *Error {
 // GetJSON405 returns the response for an HTTP 405 `application/json` response
 func (r MyVotesResponse) GetJSON405() *Error {
 	return r.JSON405
+}
+
+// GetJSON499 returns the response for an HTTP 499 `application/json` response
+func (r MyVotesResponse) GetJSON499() *Error {
+	return r.JSON499
 }
 
 // GetJSON503 returns the response for an HTTP 503 `application/json` response
@@ -902,6 +916,8 @@ type PopularResponse struct {
 	JSON404 *Error
 	// JSON405 the response for an HTTP 405 `application/json` response
 	JSON405 *Error
+	// JSON499 the response for an HTTP 499 `application/json` response
+	JSON499 *Error
 	// JSON503 the response for an HTTP 503 `application/json` response
 	JSON503 *Error
 	// JSON504 the response for an HTTP 504 `application/json` response
@@ -933,6 +949,11 @@ func (r PopularResponse) GetJSON404() *Error {
 // GetJSON405 returns the response for an HTTP 405 `application/json` response
 func (r PopularResponse) GetJSON405() *Error {
 	return r.JSON405
+}
+
+// GetJSON499 returns the response for an HTTP 499 `application/json` response
+func (r PopularResponse) GetJSON499() *Error {
+	return r.JSON499
 }
 
 // GetJSON503 returns the response for an HTTP 503 `application/json` response
@@ -1064,6 +1085,13 @@ func ParseSearchResponse(rsp *http.Response) (*SearchResponse, error) {
 		}
 		response.JSON405 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 499:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON499 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -1145,6 +1173,13 @@ func ParseMyVotesResponse(rsp *http.Response) (*MyVotesResponse, error) {
 		}
 		response.JSON405 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 499:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON499 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -1225,6 +1260,13 @@ func ParsePopularResponse(rsp *http.Response) (*PopularResponse, error) {
 			return nil, err
 		}
 		response.JSON405 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 499:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON499 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest Error

@@ -177,6 +177,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description cancelled */
+            499: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description unavailable */
             503: {
                 headers: {
@@ -260,6 +269,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description cancelled */
+            499: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description unavailable */
             503: {
                 headers: {
@@ -335,6 +353,15 @@ export interface operations {
                 headers: {
                     /** @description 允许的 HTTP 方法列表（GET）。 */
                     Allow?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description cancelled */
+            499: {
+                headers: {
                     [name: string]: unknown;
                 };
                 content: {
