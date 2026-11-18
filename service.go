@@ -370,14 +370,18 @@ func auth(user string) error {
 	return nil
 }
 func (s *Service) Search(ctx context.Context, user, q, kind, cursor string, limit int) (Page, error) {
+	return s.SearchWithParams(ctx, user, SearchParams{Query: q, Kind: kind, Cursor: cursor, Limit: limit})
+}
+func (s *Service) SearchWithParams(ctx context.Context, user string, p SearchParams) (Page, error) {
+	q := strings.TrimSpace(p.Query)
 	start := time.Now()
-	q = strings.TrimSpace(q)
+	kind, limit, cursor := p.Kind, p.Limit, p.Cursor
 	out := Page{Items: []Item{}}
 	if e := auth(user); e != nil {
 		s.observe("search", "", "unauthenticated", start, 0, 0)
 		return out, e
 	}
-	if !searchText(q, 200) || limit < 1 || limit > 100 || kind != "" && kind != "school" && kind != "course" && kind != "teacher" && kind != "review" && kind != "resource" {
+	if !validFilterID(p.SchoolID) || !validFilterID(p.CourseID) || !validFilterID(p.TeacherID) || !searchText(q, 200) || limit < 1 || limit > 100 || kind != "" && kind != "school" && kind != "course" && kind != "teacher" && kind != "review" && kind != "resource" {
 		s.observe("search", "", "invalid_input", start, 0, 0)
 		return out, ErrInput
 	}
@@ -404,7 +408,7 @@ func (s *Service) Search(ctx context.Context, user, q, kind, cursor string, limi
 		if scanned > 0 && time.Since(start) >= softBudget {
 			return continuation()
 		}
-		docs, e := s.repo.Candidates(ctx, Filter{Query: q, Kind: kind, After: after, Limit: 100})
+		docs, e := s.repo.Candidates(ctx, Filter{Query: q, Kind: kind, SchoolID: p.SchoolID, CourseID: p.CourseID, TeacherID: p.TeacherID, After: after, Limit: 100})
 		if e != nil {
 			s.observe("search", "", errorCode(e, "storage_unavailable"), start, scanned, skips)
 			return out, e
@@ -423,7 +427,7 @@ func (s *Service) Search(ctx context.Context, user, q, kind, cursor string, limi
 			if skippedRev {
 				skips++
 			}
-			if ok {
+			if ok && matchesSearchFilter(live, p) {
 				out.Items = append(out.Items, documentItem(live))
 			}
 			if len(out.Items) == limit {
@@ -440,56 +444,83 @@ func (s *Service) Search(ctx context.Context, user, q, kind, cursor string, limi
 	}
 	return continuation()
 }
-func (s *Service) MyVotes(ctx context.Context, user, cursor string, limit int) (Votes, error) {
+func (s *Service) MyVotes(ctx context.Context, user, cursor string, limit int) (result Votes, err error) {
 	start := time.Now()
+	scanned := 0
+	source, category := "", "invalid_input"
+	defer func() { s.observe("my_votes", source, errorCode(err, category), start, scanned, 0) }()
+
 	if e := auth(user); e != nil {
-		s.observe("my_votes", "", "unauthenticated", start, 0, 0)
 		return Votes{}, e
 	}
 	if limit < 1 || limit > 100 || len(cursor) > 1024 || !searchText(cursor, 1024) {
-		s.observe("my_votes", "", "invalid_input", start, 0, 0)
 		return Votes{}, ErrInput
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.config.QueryTimeout)
 	defer cancel()
-	v, e := s.sources.MyVotes(ctx, user, cursor, limit)
-	if e != nil {
-		err := upstreamError(ctx)
-		s.observe("my_votes", "reviews", errorCode(err, "upstream_unavailable"), start, 0, 0)
-		return Votes{}, err
+	const maxMyVotesScan = 500
+	out := Votes{Items: []Vote{}}
+	cur := cursor
+	seen := map[string]bool{}
+	if cur != "" {
+		seen[cur] = true
 	}
-	if len(v.Items) > limit || len(v.NextCursor) > 1024 {
-		err := upstreamError(ctx)
-		s.observe("my_votes", "reviews", errorCode(err, "invalid_source_data"), start, 0, 0)
-		return Votes{}, err
-	}
-	out := Votes{Items: []Vote{}, NextCursor: v.NextCursor}
-	scanned := 0
-	for _, vote := range v.Items {
-		scanned++
-		if vote.Target.Source != "reviews" || !validTarget(vote.Target) || (vote.Choice != "up" && vote.Choice != "down") {
-			err := upstreamError(ctx)
-			s.observe("my_votes", "reviews", errorCode(err, "invalid_source_data"), start, scanned, 0)
-			return Votes{}, err
+	for len(out.Items) < limit && scanned < maxMyVotesScan {
+		need := limit - len(out.Items)
+		if rem := maxMyVotesScan - scanned; need > rem {
+			need = rem
 		}
-		d, ok, e := s.sources.Current(ctx, user, vote.Target)
+		source, category = "reviews", "upstream_unavailable"
+		v, e := s.sources.MyVotes(ctx, user, cur, need)
 		if e != nil {
-			err := upstreamError(ctx)
-			s.observe("my_votes", "reviews", errorCode(err, "upstream_unavailable"), start, scanned, 0)
-			return Votes{}, err
+			return Votes{}, upstreamError(ctx)
 		}
-		if ok && (d.Target != vote.Target || Validate(d) != nil) {
-			s.observe("my_votes", "reviews", "invalid_source_data", start, scanned, 0)
+		category = "invalid_source_data"
+		if len(v.Items) > need || len(v.NextCursor) > 1024 {
+			return Votes{}, upstreamError(ctx)
+		}
+		if v.NextCursor != "" && (len(v.Items) == 0 || seen[v.NextCursor]) {
 			return Votes{}, ErrUnavailable
 		}
-		if ok && d.Visible {
-			out.Items = append(out.Items, vote)
+		for _, vote := range v.Items {
+			scanned++
+			if vote.Target.Source != "reviews" || vote.Target.Kind != "review" || !validTarget(vote.Target) || (vote.Choice != "up" && vote.Choice != "down") {
+				return Votes{}, upstreamError(ctx)
+			}
+			d, ok, e := s.sources.Current(ctx, user, vote.Target)
+			if e != nil {
+				category = "upstream_unavailable"
+				return Votes{}, upstreamError(ctx)
+			}
+			if ok && (d.Target != vote.Target || Validate(d) != nil) {
+				return Votes{}, ErrUnavailable
+			}
+			if ok && d.Visible {
+				out.Items = append(out.Items, Vote{
+					Target:   vote.Target,
+					Choice:   vote.Choice,
+					Title:    d.Title,
+					CourseID: d.CourseID,
+					SchoolID: d.SchoolID,
+				})
+			}
 		}
+		cur = v.NextCursor
+		if cur == "" {
+			out.NextCursor = ""
+			break
+		}
+		seen[cur] = true
+		out.NextCursor = cur
 	}
-	s.observe("my_votes", "", "ok", start, scanned, 0)
+	source = ""
 	return out, nil
 }
 func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit int) (Page, error) {
+	return s.PopularWithParams(ctx, user, PopularParams{Kind: kind, Cursor: cursor, Limit: limit})
+}
+func (s *Service) PopularWithParams(ctx context.Context, user string, p PopularParams) (Page, error) {
+	kind, limit, cursor := p.Kind, p.Limit, p.Cursor
 	start := time.Now()
 	windowDays := int(math.Ceil(s.config.HeatWindow.Hours() / 24))
 	if windowDays < 1 {
@@ -500,7 +531,7 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 		s.observe("popular", "", "unauthenticated", start, 0, 0)
 		return out, e
 	}
-	if limit < 1 || limit > 100 || (kind != "course" && kind != "teacher") {
+	if !validFilterID(p.SchoolID) || limit < 1 || limit > 100 || (kind != "course" && kind != "teacher") {
 		s.observe("popular", "", "invalid_input", start, 0, 0)
 		return out, ErrInput
 	}
@@ -591,7 +622,7 @@ func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit 
 			s.observe("popular", t.Source, "invalid_source_data", start, scanned, skips)
 			return out, ErrUnavailable
 		}
-		if ok && d.Visible {
+		if ok && d.Visible && (p.SchoolID == "" || d.SchoolID == p.SchoolID) {
 			v.d = d
 			rows = append(rows, *v)
 		}
@@ -661,6 +692,49 @@ func nonEmptyUniqueNames(values []string, max int) bool {
 	}
 	return true
 }
+func validFilterID(v string) bool {
+	return v == "" || (searchText(v, 200) && strings.TrimSpace(v) == v && v != "")
+}
+func matchesSearchFilter(d Document, p SearchParams) bool {
+	if p.Kind != "" && d.Target.Kind != p.Kind {
+		return false
+	}
+	if p.SchoolID != "" && d.SchoolID != p.SchoolID {
+		return false
+	}
+	if p.CourseID != "" && d.CourseID != p.CourseID {
+		return false
+	}
+	if p.TeacherID != "" {
+		found := false
+		for _, id := range d.TeacherIDs {
+			if id == p.TeacherID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
 func documentItem(d Document) Item {
-	return Item{Target: d.Target, Title: d.Title, SchoolID: d.SchoolID, Code: d.Code, EnglishName: d.EnglishName, FormerCodes: append([]string{}, d.FormerCodes...), FormerNames: append([]string{}, d.FormerNames...)}
+	var at *time.Time
+	if !d.At.IsZero() {
+		utc := d.At.UTC()
+		at = &utc
+	}
+	return Item{
+		Target:      d.Target,
+		Title:       d.Title,
+		SchoolID:    d.SchoolID,
+		Code:        d.Code,
+		EnglishName: d.EnglishName,
+		FormerCodes: append([]string{}, d.FormerCodes...),
+		FormerNames: append([]string{}, d.FormerNames...),
+		CourseID:    d.CourseID,
+		TeacherIDs:  append([]string(nil), d.TeacherIDs...),
+		At:          at,
+	}
 }
