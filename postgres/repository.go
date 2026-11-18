@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	_ "embed"
@@ -11,6 +12,7 @@ import (
 	s "github.com/StuHelper/stuhelper-search"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -22,7 +24,39 @@ func validDBString(v string) bool {
 //go:embed schema.sql
 var Schema string
 
-type Repository struct{ DB *sql.DB }
+type Repository struct {
+	DB        *sql.DB
+	mu        sync.Mutex
+	cursorKey []byte
+}
+
+func splitAfter(after string) (string, string, bool) {
+	if after == "" {
+		return "", "", true
+	}
+	src, id, ok := strings.Cut(after, "/")
+	if !ok || src == "" || id == "" {
+		return "", "", false
+	}
+	return src, id, true
+}
+
+func (r *Repository) CursorKey(ctx context.Context) ([]byte, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.cursorKey) == 32 {
+		return r.cursorKey, nil
+	}
+	var key []byte
+	if err := r.DB.QueryRowContext(ctx, "SELECT cursor_key FROM search.state WHERE id").Scan(&key); err != nil {
+		return nil, safe(err)
+	}
+	if len(key) != 32 {
+		return nil, s.ErrUnavailable
+	}
+	r.cursorKey = append([]byte(nil), key...)
+	return r.cursorKey, nil
+}
 
 func safe(err error) error {
 	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, s.ErrConflict) {
@@ -40,6 +74,13 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		return e
 	}
 	if _, e = tx.ExecContext(ctx, Schema); e != nil {
+		return e
+	}
+	key := make([]byte, 32)
+	if _, e = rand.Read(key); e != nil {
+		return e
+	}
+	if _, e = tx.ExecContext(ctx, "UPDATE search.state SET cursor_key=$1 WHERE id AND cursor_key IS NULL", key); e != nil {
 		return e
 	}
 	return tx.Commit()
@@ -115,19 +156,43 @@ func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, 
 	if !ready {
 		return nil, s.ErrUnavailable
 	}
-	if f.Limit < 1 || f.Limit > 100 || !validDBString(f.Query) || !validDBString(f.After) || !validDBString(f.Kind) {
+	afterSource, afterID, ok := splitAfter(f.After)
+	if !ok || f.Limit < 1 || f.Limit > 100 || !validDBString(f.Query) || !validDBString(f.After) || !validDBString(f.Kind) {
 		return nil, s.ErrInput
 	}
 	// Parameterized substring search gives literal semantics for %, _ and backslashes.
-	rows, e := r.DB.QueryContext(ctx, `SELECT data FROM search.documents WHERE (data->>'visible')::boolean
- AND source||'/'||id > $1 AND ($2='' OR CASE WHEN data->'target'->>'kind'='school' AND $2 ~ '^[0-9]+$' THEN
- id=$2 OR data->>'code'=$2
- OR (length($2)=5 AND ((id ~ '^[0-9]{10}$' AND right(id,5)=$2) OR (data->>'code' ~ '^[0-9]{10}$' AND right(data->>'code',5)=$2)))
- ELSE position(lower($2) in lower(data->>'title'))>0
- OR (data->'target'->>'kind' IN ('school','course') AND (position(lower($2) in lower(data->>'code'))>0 OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(COALESCE(NULLIF(data->'aliases','null'::jsonb),'[]'::jsonb)) alias WHERE position(lower($2) in lower(alias))>0)))
- OR (data->'target'->>'kind'='course' AND (position(lower($2) in lower(data->>'english_name'))>0 OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(COALESCE(NULLIF(data->'former_codes','null'::jsonb),'[]'::jsonb)||COALESCE(NULLIF(data->'former_names','null'::jsonb),'[]'::jsonb)) value WHERE position(lower($2) in lower(value))>0))) END)
- AND ($3='' OR data->'target'->>'kind'=$3)
- ORDER BY source||'/'||id LIMIT $4`, f.After, f.Query, f.Kind, f.Limit)
+	// COLLATE "pg_c_utf8" ensures Unicode case folding in any cluster locale; COLLATE "C" matches Go byte ordering.
+	rows, e := r.DB.QueryContext(ctx, `SELECT data FROM search.documents
+	 WHERE (data->>'visible')::boolean
+	   AND (source COLLATE "C", id COLLATE "C") > ($1 COLLATE "C", $2 COLLATE "C")
+	   AND ($3 = '' OR CASE data->'target'->>'kind'
+	     WHEN 'school' THEN
+	       id = $3
+	       OR lower((data->>'code') COLLATE "pg_c_utf8") = lower($3 COLLATE "pg_c_utf8")
+	       OR ($3 ~ '^[0-9]{5}$' AND ((id ~ '^[0-9]{10}$' AND right(id, 5) = $3) OR (data->>'code' ~ '^[0-9]{10}$' AND right(data->>'code', 5) = $3)))
+	       OR position(lower($3 COLLATE "pg_c_utf8") in lower((data->>'title') COLLATE "pg_c_utf8")) > 0
+	       OR EXISTS (
+	         SELECT 1 FROM jsonb_array_elements_text(COALESCE(NULLIF(data->'aliases', 'null'::jsonb), '[]'::jsonb)) alias
+	         WHERE position(lower($3 COLLATE "pg_c_utf8") in lower(alias COLLATE "pg_c_utf8")) > 0
+	       )
+	     WHEN 'course' THEN
+	       position(lower($3 COLLATE "pg_c_utf8") in lower((data->>'title') COLLATE "pg_c_utf8")) > 0
+	       OR position(lower($3 COLLATE "pg_c_utf8") in lower((data->>'code') COLLATE "pg_c_utf8")) > 0
+	       OR position(lower($3 COLLATE "pg_c_utf8") in lower((data->>'english_name') COLLATE "pg_c_utf8")) > 0
+	       OR EXISTS (
+	         SELECT 1 FROM jsonb_array_elements_text(
+	           COALESCE(NULLIF(data->'aliases', 'null'::jsonb), '[]'::jsonb)
+	           || COALESCE(NULLIF(data->'former_codes', 'null'::jsonb), '[]'::jsonb)
+	           || COALESCE(NULLIF(data->'former_names', 'null'::jsonb), '[]'::jsonb)
+	         ) value
+	         WHERE position(lower($3 COLLATE "pg_c_utf8") in lower(value COLLATE "pg_c_utf8")) > 0
+	       )
+	     ELSE
+	       position(lower($3 COLLATE "pg_c_utf8") in lower((data->>'title') COLLATE "pg_c_utf8")) > 0
+	   END)
+	   AND ($4 = '' OR data->'target'->>'kind' = $4)
+	 ORDER BY source COLLATE "C", id COLLATE "C"
+	 LIMIT $5`, afterSource, afterID, f.Query, f.Kind, f.Limit)
 	if e != nil {
 		return nil, safe(e)
 	}

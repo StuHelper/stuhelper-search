@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	s "github.com/StuHelper/stuhelper-search"
+	"time"
 )
 
 func putActivity(ctx context.Context, tx *sql.Tx, d s.ActivitySnapshot, equal bool) error {
@@ -38,7 +39,8 @@ func (r *Repository) ApplyActivity(ctx context.Context, event s.ActivityEvent, d
 	return safe(tx.Commit())
 }
 func (r *Repository) Activities(ctx context.Context, f s.ActivityFilter) ([]s.ActivitySnapshot, error) {
-	if f.Limit < 1 || f.Limit > 100 || !validDBString(f.Kind) || !validDBString(f.After) {
+	afterSource, afterID, ok := splitAfter(f.After)
+	if !ok || f.Limit < 1 || f.Limit > 100 || !validDBString(f.Kind) || !validDBString(f.After) {
 		return nil, s.ErrInput
 	}
 	var ready bool
@@ -48,7 +50,20 @@ func (r *Repository) Activities(ctx context.Context, f s.ActivityFilter) ([]s.Ac
 	if !ready {
 		return nil, s.ErrUnavailable
 	}
-	rows, e := r.DB.QueryContext(ctx, `SELECT data FROM search.activities WHERE kind=$1 AND day>=$2 AND day<$3 AND source||'/'||id>$4 AND (data->>'visible')::boolean ORDER BY source||'/'||id LIMIT $5`, f.Kind, f.From, f.To, f.After, f.Limit)
+	var rows *sql.Rows
+	var e error
+	if f.AfterDay == "" {
+		rows, e = r.DB.QueryContext(ctx, `SELECT data FROM search.activities WHERE kind=$1 AND day>=$2 AND day<$3 AND (source COLLATE "C", id COLLATE "C") > ($4 COLLATE "C", $5 COLLATE "C") AND (data->>'visible')::boolean ORDER BY source COLLATE "C", id COLLATE "C" LIMIT $6`, f.Kind, f.From, f.To, afterSource, afterID, f.Limit)
+	} else {
+		day, err := time.Parse(time.DateOnly, f.AfterDay)
+		if err != nil || day.Before(f.From.UTC()) || !day.Before(f.To.UTC()) {
+			return nil, s.ErrInput
+		}
+		rows, e = r.DB.QueryContext(ctx, `SELECT data FROM search.activities
+ WHERE kind=$1 AND day >= $2 AND day < $3 AND (data->>'visible')::boolean
+ AND (day,source COLLATE "C",id COLLATE "C") > ($4::date,$5 COLLATE "C",$6 COLLATE "C")
+ ORDER BY day,source COLLATE "C",id COLLATE "C" LIMIT $7`, f.Kind, f.From, f.To, f.AfterDay, afterSource, afterID, f.Limit)
+	}
 	if e != nil {
 		return nil, safe(e)
 	}

@@ -30,6 +30,8 @@ type ActivityEvent struct {
 	Data        ActivitySnapshot `json:"data"`
 }
 type ActivityFilter struct {
+	// AfterDay selects window-ordered traversal; omitted by callers using the source/ID order.
+	AfterDay    string
 	Kind, After string
 	From, To    time.Time
 	Limit       int
