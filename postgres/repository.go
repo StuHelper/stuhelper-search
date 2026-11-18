@@ -279,20 +279,60 @@ func (r *Repository) RebuildWindow(ctx context.Context, from, to time.Time, load
 	return safe(tx.Commit())
 }
 func (r *Repository) CheckRuntime(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	var unsafe bool
-	e := r.DB.QueryRowContext(ctx, `SELECT rolsuper OR rolcreatedb OR rolcreaterole OR has_schema_privilege(current_user,'search','CREATE') FROM pg_roles WHERE rolname=current_user`).Scan(&unsafe)
+	e := r.DB.QueryRowContext(ctx, `WITH owners AS (
+			SELECT nspowner AS owner FROM pg_namespace WHERE nspname = 'search'
+			UNION
+			SELECT c.relowner FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'search'
+		) SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolbypassrls OR rolreplication
+		OR has_schema_privilege(current_user, 'search', 'CREATE')
+		OR EXISTS (SELECT 1 FROM owners WHERE pg_has_role(current_user, owner,
+			CASE WHEN current_setting('server_version_num')::int >= 160000 THEN 'USAGE,SET' ELSE 'MEMBER' END))
+		FROM pg_roles WHERE rolname = current_user`).Scan(&unsafe)
 	if e != nil || unsafe {
 		return s.ErrUnavailable
 	}
-	for _, table := range []string{"documents", "activities", "inbox", "state"} {
-		var ok bool
-		e = r.DB.QueryRowContext(ctx, "SELECT has_table_privilege(current_user,$1,'SELECT') AND has_table_privilege(current_user,$1,'INSERT')", "search."+table).Scan(&ok)
-		if e != nil || !ok {
-			return s.ErrUnavailable
+	for _, req := range []struct {
+		table string
+		privs []string
+	}{
+		{"search.documents", []string{"SELECT", "INSERT", "UPDATE"}},
+		{"search.activities", []string{"SELECT", "INSERT", "UPDATE"}},
+		{"search.state", []string{"SELECT", "UPDATE"}},
+		{"search.inbox", []string{"SELECT", "INSERT"}},
+	} {
+		for _, priv := range req.privs {
+			var ok bool
+			if e = r.DB.QueryRowContext(ctx, "SELECT has_table_privilege(current_user, $1, $2)", req.table, priv).Scan(&ok); e != nil || !ok {
+				return s.ErrUnavailable
+			}
 		}
 	}
 	var forbidden bool
-	e = r.DB.QueryRowContext(ctx, "SELECT has_table_privilege(current_user,'search.inbox','UPDATE,DELETE')").Scan(&forbidden)
+	e = r.DB.QueryRowContext(ctx, `SELECT
+		has_table_privilege(current_user, 'search.inbox', 'UPDATE,DELETE,TRUNCATE')
+		OR has_table_privilege(current_user, 'search.documents', 'TRUNCATE')
+		OR has_table_privilege(current_user, 'search.activities', 'TRUNCATE')
+		OR has_table_privilege(current_user, 'search.state', 'TRUNCATE')
+		OR EXISTS (
+			SELECT 1 FROM pg_namespace
+			WHERE nspname NOT LIKE 'pg_%' AND nspname <> 'information_schema'
+			  AND (
+				has_schema_privilege(current_user, oid, 'CREATE')
+				OR (nspname NOT IN ('search', 'public') AND has_schema_privilege(current_user, oid, 'USAGE'))
+			  )
+		)
+		OR EXISTS (
+			SELECT 1 FROM pg_class c
+			JOIN pg_namespace n ON n.oid = c.relnamespace
+			WHERE n.nspname NOT LIKE 'pg_%' AND n.nspname NOT IN ('search', 'information_schema')
+			  AND (
+				(c.relkind IN ('r', 'p', 'v', 'm', 'f') AND has_table_privilege(current_user, c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
+				OR (c.relkind = 'S' AND has_sequence_privilege(current_user, c.oid, 'USAGE,SELECT,UPDATE'))
+			  )
+		)`).Scan(&forbidden)
 	if e != nil || forbidden {
 		return s.ErrUnavailable
 	}

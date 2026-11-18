@@ -46,6 +46,7 @@ scenario_tests:
     - activity_test.go#TestActivitySnapshotPagination
     - rebuild_window_test.go#TestRebuildPreservesOutOfWindowActivitiesBatchesWritesAndDetectsCycles
     - validation_inbox_test.go#TestUTF8NullValidationUnicodeLengthsAndInboxCanonicalDedup
+    - migration_runtime_test.go#TestIdempotentMigrateLockFreeAndStrictRuntimePrivilegeChecks
 
   DS-SCHOOL-01:
     - school_search_test.go#TestSchoolSearchCodesNamesAliasesCurrentRightsAndRebuild
