@@ -22,8 +22,11 @@ type Service struct {
 }
 
 func New(repo Repository, sources Sources, c Config) (*Service, error) {
-	if repo == nil || sources == nil || c.QueryTimeout <= 0 || c.QueryTimeout > 30*time.Second || c.HeatWindow <= 0 || c.HeatWindow > 366*24*time.Hour || c.MinimumHeatSamples < 1 {
+	if repo == nil || sources == nil || c.QueryTimeout <= 0 || c.QueryTimeout > 30*time.Second || c.RebuildTimeout < 0 || c.RebuildTimeout > 30*time.Minute || c.HeatWindow <= 0 || c.HeatWindow > 366*24*time.Hour || c.MinimumHeatSamples < 1 {
 		return nil, ErrInput
+	}
+	if c.RebuildTimeout == 0 {
+		c.RebuildTimeout = 2 * time.Minute
 	}
 	positive := false
 	for _, w := range c.HeatWeights {
@@ -100,12 +103,19 @@ func (s *Service) Consume(ctx context.Context, e Event) error {
 	defer cancel()
 	return s.repo.Apply(ctx, e, hex.EncodeToString(h[:]))
 }
+
+type windowRebuilder interface {
+	RebuildWindow(context.Context, time.Time, time.Time, func(func([]Document) error, func([]ActivitySnapshot) error) error) error
+}
+
 func (s *Service) Rebuild(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, s.config.RebuildTimeout)
 	defer cancel()
-	return s.repo.Rebuild(ctx, func(put func([]Document) error, putActivity func([]ActivitySnapshot) error) error {
+	from, to := s.activityWindow()
+	load := func(put func([]Document) error, putActivity func([]ActivitySnapshot) error) error {
 		for _, source := range []string{"catalog", "reviews", "resources"} {
 			cursor := ""
+			seen := map[string]bool{}
 			for pages := 0; ; pages++ {
 				if pages >= 10000 {
 					return ErrUnavailable
@@ -117,9 +127,10 @@ func (s *Service) Rebuild(ctx context.Context) error {
 				if e != nil {
 					return e
 				}
-				if len(docs) > 100 || next != "" && next == cursor {
+				if len(docs) > 100 || next != "" && (next == cursor || seen[next]) {
 					return ErrUnavailable
 				}
+				seen[next] = true
 				for _, d := range docs {
 					if d.Target.Source != source || Validate(d) != nil {
 						return ErrUnavailable
@@ -134,8 +145,12 @@ func (s *Service) Rebuild(ctx context.Context) error {
 				cursor = next
 			}
 		}
-		return s.rebuildActivities(ctx, putActivity)
-	})
+		return s.rebuildActivitiesWindow(ctx, from, to, putActivity)
+	}
+	if wr, ok := s.repo.(windowRebuilder); ok {
+		return wr.RebuildWindow(ctx, from, to, load)
+	}
+	return s.repo.Rebuild(ctx, load)
 }
 func key(d Document) string  { return d.Target.Source + "/" + d.Target.ID }
 func encode(v string) string { return base64.RawURLEncoding.EncodeToString([]byte(v)) }
