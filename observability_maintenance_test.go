@@ -183,3 +183,33 @@ func TestObserverStatusAndBoundedMaintenanceCleanup(t *testing.T) {
 		t.Fatalf("boundary activity row was deleted: %d %v", boundaryAct, err)
 	}
 }
+
+type failingSecondPage struct{ *source }
+
+func (f failingSecondPage) DiscoverySnapshot(_ context.Context, source, cursor string, _ int) ([]s.Document, string, error) {
+	if cursor == "" {
+		return []s.Document{doc(source, "course", "first")}, "page-2", nil
+	}
+	return nil, "", s.ErrUnavailable
+}
+
+func TestSanitizedObservationsAcrossSnapshotPages(t *testing.T) {
+	_, repo, f, _ := setup(t)
+	var last s.Observation
+	svc, err := s.New(repo, failingSecondPage{f}, s.Config{QueryTimeout: time.Second, HeatWindow: 24 * time.Hour, HeatWeights: [4]float64{1}, MinimumHeatSamples: 1, Now: func() time.Time { return now }, Observer: s.ObserverFunc(func(o s.Observation) { last = o })})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := doc("untrusted-source", "course", "id")
+	if err = svc.Consume(context.Background(), event(d, "event")); !errors.Is(err, s.ErrInput) || last.Source != "" {
+		t.Errorf("invalid content source label: %q %v", last.Source, err)
+	}
+	a := activity("catalog", "course", "id", "2026-11-09", map[string]int64{"views": 1})
+	a.Source = "untrusted-source"
+	if err = svc.ConsumeActivity(context.Background(), activityEvent(a, "evt")); !errors.Is(err, s.ErrInput) || last.Source != "" {
+		t.Errorf("invalid activity source label: %q %v", last.Source, err)
+	}
+	if err = svc.Rebuild(context.Background()); !errors.Is(err, s.ErrUnavailable) || last.Source != "catalog" || last.ErrorCode != "upstream_unavailable" {
+		t.Errorf("second source page lost attribution: %+v %v", last, err)
+	}
+}

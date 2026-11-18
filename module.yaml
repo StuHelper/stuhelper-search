@@ -35,6 +35,7 @@ scenario_tests:
     - integration_test.go#TestProjectionFailureRollback
     - activity_test.go#TestActivityReplayAndRebuild
   DS-07:
+    - observability_maintenance_test.go#TestSanitizedObservationsAcrossSnapshotPages
     - integration_test.go#TestContentDocumentKinds
     - integration_test.go#TestProjectionReplayRebuildAndIsolation
     - activity_test.go#TestActivityReplayAndRebuild

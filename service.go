@@ -86,6 +86,11 @@ func Validate(d Document) error {
 }
 func (s *Service) observe(op, src, code string, start time.Time, scanned, skips int) {
 	if s.config.Observer != nil {
+		switch src {
+		case "catalog", "reviews", "resources", "favorites":
+		default:
+			src = ""
+		}
 		s.config.Observer.ObserveSearch(Observation{
 			Operation:     op,
 			Source:        src,
@@ -167,9 +172,9 @@ func (s *Service) Rebuild(ctx context.Context) error {
 	var scanned int
 	loader := func(put func([]Document) error, putActivity func([]ActivitySnapshot) error) error {
 		for _, source := range []string{"catalog", "reviews", "resources"} {
-			activeSource = source
 			cursor := ""
 			for pages := 0; ; pages++ {
+				activeSource = source
 				if pages >= 10000 {
 					errCode = "invalid_source_data"
 					return ErrUnavailable
