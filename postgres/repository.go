@@ -161,11 +161,6 @@ matched AS (
         WHEN kind = 'school' AND t ~ '^[0-9]+$' THEN
           id = t OR norm_code = t
           OR (length(t) = 5 AND ((id ~ '^[0-9]{10}$' AND right(id, 5) = t) OR (norm_code ~ '^[0-9]{10}$' AND right(norm_code, 5) = t)))
-          OR position(t in l_title) > 0
-          OR EXISTS (
-            SELECT 1 FROM jsonb_array_elements_text(COALESCE(NULLIF(data->'aliases', 'null'::jsonb), '[]'::jsonb)) alias
-            WHERE position(t in lower(normalize(alias, NFKC) COLLATE "pg_c_utf8")) > 0
-          )
         ELSE
           position(lower(t COLLATE "pg_c_utf8") in l_title) > 0
           OR (kind IN ('school', 'course') AND position(lower(t COLLATE "pg_c_utf8") in l_code) > 0)

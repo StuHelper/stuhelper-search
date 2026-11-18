@@ -15,7 +15,7 @@ func TestSchoolSearchCodesNamesAliasesCurrentRightsAndRebuild(t *testing.T) {
 	d.SchoolID = d.Target.ID
 	d.Title = "北京航空航天大学"
 	d.Code = "10006"
-	d.Aliases = []string{"北航", "Beihang", "literal%_"}
+	d.Aliases = []string{"北航", "Beihang", "literal%_", "Campus 10006"}
 	add(t, svc, f, d)
 	other := doc("catalog", "school", "4111010007")
 	other.SchoolID = other.Target.ID
