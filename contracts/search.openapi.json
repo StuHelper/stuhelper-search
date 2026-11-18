@@ -43,7 +43,7 @@
             "description": "上一页返回的 next_cursor 续页游标；首次请求省略或传空字符串。",
             "schema": {
               "type": "string",
-              "maxLength": 1024
+              "maxLength": 2048
             }
           },
           {
@@ -182,7 +182,7 @@
             "description": "上一页返回的 next_cursor 续页游标；首次请求省略或传空字符串。",
             "schema": {
               "type": "string",
-              "maxLength": 1024
+              "maxLength": 2048
             }
           },
           {
@@ -520,7 +520,7 @@
           },
           "next_cursor": {
             "type": "string",
-            "maxLength": 1024,
+            "maxLength": 2048,
             "description": "下一页续读游标；仅当为空字符串时表示分页结束，不能以 items 长度小于 limit 判断结束。"
           }
         },
