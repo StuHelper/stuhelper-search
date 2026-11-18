@@ -34,11 +34,13 @@ scenario_tests:
   DS-06:
     - integration_test.go#TestProjectionFailureRollback
     - activity_test.go#TestActivityReplayAndRebuild
+    - validation_inbox_test.go#TestUTF8NullValidationUnicodeLengthsAndInboxCanonicalDedup
   DS-07:
     - integration_test.go#TestContentDocumentKinds
     - integration_test.go#TestProjectionReplayRebuildAndIsolation
     - activity_test.go#TestActivityReplayAndRebuild
     - activity_test.go#TestActivitySnapshotPagination
+    - validation_inbox_test.go#TestUTF8NullValidationUnicodeLengthsAndInboxCanonicalDedup
 
   DS-SCHOOL-01:
     - school_search_test.go#TestSchoolSearchCodesNamesAliasesCurrentRightsAndRebuild

@@ -8,7 +8,13 @@ import (
 	"errors"
 	s "github.com/StuHelper/stuhelper-search"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"strings"
+	"unicode/utf8"
 )
+
+func validDBString(v string) bool {
+	return utf8.ValidString(v) && !strings.ContainsRune(v, 0)
+}
 
 //go:embed schema.sql
 var Schema string
@@ -61,7 +67,7 @@ func (r *Repository) Apply(ctx context.Context, event s.Event, digest string) er
 		return safe(e)
 	}
 	var old string
-	e = tx.QueryRowContext(ctx, "SELECT digest FROM search.inbox WHERE source=$1 AND id=$2", event.Source, event.ID).Scan(&old)
+	e = tx.QueryRowContext(ctx, "SELECT digest FROM search.inbox WHERE source=$1 AND event_type=$2 AND id=$3", event.Source, event.Type, event.ID).Scan(&old)
 	if e == nil {
 		if old != digest {
 			return s.ErrConflict
@@ -74,7 +80,7 @@ func (r *Repository) Apply(ctx context.Context, event s.Event, digest string) er
 	if e = put(ctx, tx, event.Data, false); e != nil {
 		return safe(e)
 	}
-	if _, e = tx.ExecContext(ctx, "INSERT INTO search.inbox(source,id,digest) VALUES($1,$2,$3)", event.Source, event.ID, digest); e != nil {
+	if _, e = tx.ExecContext(ctx, "INSERT INTO search.inbox(source,event_type,id,digest) VALUES($1,$2,$3,$4)", event.Source, event.Type, event.ID, digest); e != nil {
 		return safe(e)
 	}
 	return safe(tx.Commit())
@@ -84,7 +90,7 @@ func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, 
 	if e := r.DB.QueryRowContext(ctx, "SELECT ready FROM search.state WHERE id").Scan(&ready); e != nil || !ready {
 		return nil, s.ErrUnavailable
 	}
-	if f.Limit < 1 || f.Limit > 100 {
+	if f.Limit < 1 || f.Limit > 100 || !validDBString(f.Query) || !validDBString(f.After) || !validDBString(f.Kind) {
 		return nil, s.ErrInput
 	}
 	// Parameterized substring search gives literal semantics for %, _ and backslashes.

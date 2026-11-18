@@ -41,7 +41,7 @@ func New(repo Repository, sources Sources, c Config) (*Service, error) {
 	return &Service{repo, sources, c}, nil
 }
 func validTarget(t Target) bool {
-	return len(t.ID) > 0 && len(t.ID) <= 200 && !strings.ContainsRune(t.ID, 0) && ((t.Source == "catalog" && (t.Kind == "school" || t.Kind == "course" || t.Kind == "teacher")) || (t.Source == "reviews" && t.Kind == "review") || (t.Source == "resources" && t.Kind == "resource"))
+	return t.ID != "" && searchText(t.ID, 200) && ((t.Source == "catalog" && (t.Kind == "school" || t.Kind == "course" || t.Kind == "teacher")) || (t.Source == "reviews" && t.Kind == "review") || (t.Source == "resources" && t.Kind == "resource"))
 }
 func Validate(d Document) error {
 	if d.Target.Kind == "school" || d.Target.Kind == "course" {
@@ -55,14 +55,14 @@ func Validate(d Document) error {
 		return ErrInput
 	}
 	if d.Target.Kind == "course" {
-		if !searchText(d.EnglishName, 256) || !searchNames(d.FormerCodes, 128) || !searchNames(d.FormerNames, 256) {
+		if !searchText(d.EnglishName, 256) || !nonEmptyUniqueNames(d.FormerCodes, 128) || !nonEmptyUniqueNames(d.FormerNames, 256) {
 			return ErrInput
 		}
 	} else if d.EnglishName != "" || len(d.FormerCodes) > 0 || len(d.FormerNames) > 0 {
 		return ErrInput
 	}
 
-	if !validTarget(d.Target) || d.Revision < 1 || len(d.Title) > 1000 || !utf8.ValidString(d.Title) || len(d.SchoolID) > 200 || len(d.TeacherIDs) > 100 || d.At.IsZero() {
+	if !validTarget(d.Target) || d.Revision < 1 || !searchText(d.Title, 1000) || !searchText(d.SchoolID, 200) || !searchText(d.CourseID, 200) || len(d.TeacherIDs) > 100 || d.At.IsZero() {
 		return ErrInput
 	}
 	if d.Visible && (d.Title == "" || d.SchoolID == "") {
@@ -70,13 +70,10 @@ func Validate(d Document) error {
 	}
 	seen := map[string]bool{}
 	for _, id := range d.TeacherIDs {
-		if id == "" || len(id) > 200 || seen[id] {
+		if id == "" || !searchText(id, 200) || seen[id] {
 			return ErrInput
 		}
 		seen[id] = true
-	}
-	if len(d.CourseID) > 200 {
-		return ErrInput
 	}
 	if d.Visible && d.Target.Kind == "review" && d.CourseID == "" {
 		return ErrInput
@@ -84,13 +81,33 @@ func Validate(d Document) error {
 
 	return nil
 }
+
+func canonicalDocument(d Document) Document {
+	d.At = d.At.UTC()
+	if len(d.Aliases) == 0 {
+		d.Aliases = nil
+	}
+	if len(d.TeacherIDs) == 0 {
+		d.TeacherIDs = nil
+	}
+	if len(d.FormerCodes) == 0 {
+		d.FormerCodes = nil
+	}
+	if len(d.FormerNames) == 0 {
+		d.FormerNames = nil
+	}
+	return d
+}
+
 func (s *Service) Consume(ctx context.Context, e Event) error {
-	if e.SpecVersion != "1.0" || e.ID == "" || len(e.ID) > 200 || e.Source != e.Data.Target.Source || e.Subject != e.Data.Target.ID || e.Type != e.Source+".discovery.v1" || e.Time.IsZero() {
+	if e.SpecVersion != "1.0" || e.ID == "" || !searchText(e.ID, 200) || e.Source != e.Data.Target.Source || e.Subject != e.Data.Target.ID || e.Type != e.Source+".discovery.v1" || e.Time.IsZero() {
 		return ErrInput
 	}
 	if err := Validate(e.Data); err != nil {
 		return err
 	}
+	e.Time = e.Time.UTC()
+	e.Data = canonicalDocument(e.Data)
 	b, err := json.Marshal(e)
 	if err != nil {
 		return ErrInput
@@ -147,7 +164,11 @@ func decode(v string) (string, error) {
 	if e != nil {
 		return "", ErrInput
 	}
-	return string(b), nil
+	out := string(b)
+	if !utf8.ValidString(out) || strings.ContainsRune(out, 0) {
+		return "", ErrInput
+	}
+	return out, nil
 }
 func (s *Service) current(ctx context.Context, user string, d Document) (Document, bool, error) {
 	live, ok, e := s.sources.Current(ctx, user, d.Target)
@@ -174,7 +195,7 @@ func (s *Service) Search(ctx context.Context, user, q, kind, cursor string, limi
 	if e := auth(user); e != nil {
 		return out, e
 	}
-	if utf8.RuneCountInString(q) > 200 || limit < 1 || limit > 100 || kind != "" && kind != "school" && kind != "course" && kind != "teacher" && kind != "review" && kind != "resource" {
+	if !searchText(q, 200) || limit < 1 || limit > 100 || kind != "" && kind != "school" && kind != "course" && kind != "teacher" && kind != "review" && kind != "resource" {
 		return out, ErrInput
 	}
 	after, e := decode(cursor)
@@ -215,7 +236,7 @@ func (s *Service) MyVotes(ctx context.Context, user, cursor string, limit int) (
 	if e := auth(user); e != nil {
 		return Votes{}, e
 	}
-	if limit < 1 || limit > 100 || len(cursor) > 1024 {
+	if limit < 1 || limit > 100 || len(cursor) > 1024 || !searchText(cursor, 1024) {
 		return Votes{}, ErrInput
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.config.QueryTimeout)
@@ -371,6 +392,19 @@ func searchNames(values []string, max int) bool {
 		if !searchText(value, max) {
 			return false
 		}
+	}
+	return true
+}
+func nonEmptyUniqueNames(values []string, max int) bool {
+	if len(values) > 50 {
+		return false
+	}
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		if value == "" || !searchText(value, max) || seen[value] {
+			return false
+		}
+		seen[value] = true
 	}
 	return true
 }
