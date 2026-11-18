@@ -94,6 +94,9 @@ func (s *Service) activityWindow() (time.Time, time.Time) {
 }
 func (s *Service) rebuildActivities(ctx context.Context, put func([]ActivitySnapshot) error) error {
 	from, to := s.activityWindow()
+	return s.rebuildActivitiesWindow(ctx, from, to, put)
+}
+func (s *Service) rebuildActivitiesWindow(ctx context.Context, from, to time.Time, put func([]ActivitySnapshot) error) error {
 	for _, source := range []string{"catalog", "reviews", "favorites"} {
 		cursor := ""
 		seen := map[string]bool{}

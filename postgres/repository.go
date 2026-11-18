@@ -8,6 +8,7 @@ import (
 	"errors"
 	s "github.com/StuHelper/stuhelper-search"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"time"
 )
 
 //go:embed schema.sql
@@ -115,7 +116,105 @@ func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, 
 	}
 	return out, safe(rows.Err())
 }
+func putDocumentBatch(ctx context.Context, tx *sql.Tx, docs []s.Document) error {
+	if len(docs) == 0 {
+		return nil
+	}
+	sources := make([]string, len(docs))
+	ids := make([]string, len(docs))
+	revisions := make([]int64, len(docs))
+	payloads := make([]string, len(docs))
+	seen := make(map[string]bool, len(docs))
+	for i, d := range docs {
+		k := d.Target.Source + "/" + d.Target.ID
+		if seen[k] {
+			return s.ErrUnavailable
+		}
+		seen[k] = true
+		b, err := json.Marshal(d)
+		if err != nil {
+			return err
+		}
+		sources[i] = d.Target.Source
+		ids[i] = d.Target.ID
+		revisions[i] = d.Revision
+		payloads[i] = string(b)
+	}
+	var stale bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM search.documents cur
+		JOIN UNNEST($1::text[], $2::text[], $3::bigint[]) AS inc(source, id, revision)
+		  ON cur.source = inc.source AND cur.id = inc.id
+		WHERE cur.revision > inc.revision
+	)`, sources, ids, revisions).Scan(&stale); err != nil {
+		return err
+	}
+	if stale {
+		return s.ErrConflict
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO search.documents(source,id,revision,data)
+		SELECT src, id, rev, payload::jsonb
+		FROM UNNEST($1::text[], $2::text[], $3::bigint[], $4::text[]) AS inc(src, id, rev, payload)
+		ON CONFLICT (source,id) DO UPDATE SET revision=EXCLUDED.revision, data=EXCLUDED.data
+		WHERE search.documents.revision <= EXCLUDED.revision`, sources, ids, revisions, payloads)
+	return err
+}
+
+func putActivityBatch(ctx context.Context, tx *sql.Tx, docs []s.ActivitySnapshot) error {
+	if len(docs) == 0 {
+		return nil
+	}
+	sources := make([]string, len(docs))
+	ids := make([]string, len(docs))
+	kinds := make([]string, len(docs))
+	objectIDs := make([]string, len(docs))
+	days := make([]string, len(docs))
+	revisions := make([]int64, len(docs))
+	payloads := make([]string, len(docs))
+	seen := make(map[string]bool, len(docs))
+	for i, d := range docs {
+		k := d.Source + "/" + d.ID
+		if seen[k] {
+			return s.ErrUnavailable
+		}
+		seen[k] = true
+		b, err := json.Marshal(d)
+		if err != nil {
+			return err
+		}
+		sources[i] = d.Source
+		ids[i] = d.ID
+		kinds[i] = d.Target.Kind
+		objectIDs[i] = d.Target.ID
+		days[i] = d.Day
+		revisions[i] = d.Revision
+		payloads[i] = string(b)
+	}
+	var stale bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM search.activities cur
+		JOIN UNNEST($1::text[], $2::text[], $3::bigint[]) AS inc(source, id, revision)
+		  ON cur.source = inc.source AND cur.id = inc.id
+		WHERE cur.revision > inc.revision
+	)`, sources, ids, revisions).Scan(&stale); err != nil {
+		return err
+	}
+	if stale {
+		return s.ErrConflict
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO search.activities(source,id,kind,object_id,day,revision,data)
+		SELECT src, id, kind, obj, day::date, rev, payload::jsonb
+		FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::bigint[], $7::text[]) AS inc(src, id, kind, obj, day, rev, payload)
+		ON CONFLICT (source,id) DO UPDATE SET revision=EXCLUDED.revision, data=EXCLUDED.data
+		WHERE search.activities.revision <= EXCLUDED.revision`, sources, ids, kinds, objectIDs, days, revisions, payloads)
+	return err
+}
+
 func (r *Repository) Rebuild(ctx context.Context, load func(func([]s.Document) error, func([]s.ActivitySnapshot) error) error) error {
+	return r.RebuildWindow(ctx, time.Time{}, time.Time{}, load)
+}
+
+func (r *Repository) RebuildWindow(ctx context.Context, from, to time.Time, load func(func([]s.Document) error, func([]s.ActivitySnapshot) error) error) error {
 	tx, e := r.DB.BeginTx(ctx, nil)
 	if e != nil {
 		return safe(e)
@@ -124,43 +223,22 @@ func (r *Repository) Rebuild(ctx context.Context, load func(func([]s.Document) e
 	if e = lock(ctx, tx); e != nil {
 		return safe(e)
 	}
-	// Preserve revision tombstones for objects absent from the snapshot, so late events cannot resurrect them.
-	if _, e = tx.ExecContext(ctx, `UPDATE search.documents SET data=jsonb_set(data,'{visible}','false')`); e != nil {
+	// Preserve revision tombstones for objects absent from the snapshot without rewriting already-hidden rows or wiping activities outside [from, to).
+	if _, e = tx.ExecContext(ctx, `UPDATE search.documents SET data=jsonb_set(data,'{visible}','false') WHERE (data->>'visible')::boolean`); e != nil {
 		return safe(e)
 	}
-	if _, e = tx.ExecContext(ctx, `UPDATE search.activities SET data=jsonb_set(data,'{visible}','false')`); e != nil {
+	if !from.IsZero() && !to.IsZero() {
+		_, e = tx.ExecContext(ctx, `UPDATE search.activities SET data=jsonb_set(data,'{visible}','false') WHERE day>=$1 AND day<$2 AND (data->>'visible')::boolean`, from.Format(time.DateOnly), to.Format(time.DateOnly))
+	} else {
+		_, e = tx.ExecContext(ctx, `UPDATE search.activities SET data=jsonb_set(data,'{visible}','false') WHERE (data->>'visible')::boolean`)
+	}
+	if e != nil {
 		return safe(e)
 	}
 	e = load(func(docs []s.Document) error {
-		for _, d := range docs {
-			var rev int64
-			e := tx.QueryRowContext(ctx, "SELECT revision FROM search.documents WHERE source=$1 AND id=$2", d.Target.Source, d.Target.ID).Scan(&rev)
-			if e != nil && !errors.Is(e, sql.ErrNoRows) {
-				return e
-			}
-			if rev > d.Revision {
-				return s.ErrConflict
-			}
-			if e = put(ctx, tx, d, true); e != nil {
-				return e
-			}
-		}
-		return nil
+		return putDocumentBatch(ctx, tx, docs)
 	}, func(docs []s.ActivitySnapshot) error {
-		for _, d := range docs {
-			var rev int64
-			err := tx.QueryRowContext(ctx, "SELECT revision FROM search.activities WHERE source=$1 AND id=$2", d.Source, d.ID).Scan(&rev)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				return err
-			}
-			if rev > d.Revision {
-				return s.ErrConflict
-			}
-			if err = putActivity(ctx, tx, d, true); err != nil {
-				return err
-			}
-		}
-		return nil
+		return putActivityBatch(ctx, tx, docs)
 	})
 	if e != nil {
 		return safe(e)
