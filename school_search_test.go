@@ -15,13 +15,14 @@ func TestSchoolSearchCodesNamesAliasesCurrentRightsAndRebuild(t *testing.T) {
 	d.SchoolID = d.Target.ID
 	d.Title = "北京航空航天大学"
 	d.Code = "10006"
-	d.Aliases = []string{"北航", "Beihang", "literal%_", "Campus 10006"}
+	d.Aliases = []string{"北航", "Beihang", "literal%_", "Campus 31415"}
 	add(t, svc, f, d)
 	other := doc("catalog", "school", "4111010007")
 	other.SchoolID = other.Target.ID
 	other.Title = "北京理工大学"
+	other.Code = "SCH-10007"
 	add(t, svc, f, other)
-	for _, q := range []string{"4111010006", "10006", " 北京航空航天大学 ", "北航", "BEIHANG", "literal%_"} {
+	for _, q := range []string{"4111010006", "10006", " 北京航空航天大学 ", "北航", "BEIHANG", "literal%_", "314"} {
 		for _, kind := range []string{"school", ""} {
 			page, e := svc.Search(ctx, "u", q, kind, "", 20)
 			if e != nil || len(page.Items) != 1 || page.Items[0].Target != d.Target {
@@ -29,7 +30,7 @@ func TestSchoolSearchCodesNamesAliasesCurrentRightsAndRebuild(t *testing.T) {
 			}
 		}
 	}
-	for _, q := range []string{"99999", "1000", "_unknown%"} {
+	for _, q := range []string{"99999", "1000", "SCH-1000", "_unknown%"} {
 		page, e := svc.Search(ctx, "u", q, "school", "", 20)
 		if e != nil || len(page.Items) != 0 {
 			t.Fatal(q, page, e)
