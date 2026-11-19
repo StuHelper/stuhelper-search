@@ -24,25 +24,45 @@ scenario_tests:
   DS-COURSE-01:
     - course_search_test.go#TestCourseSearchIncludesCurrentFormerAndEnglishNames
     - course_search_test.go#TestCourseSearchFieldsValidateAtEventBoundary
+    - relevance_search_test.go#TestMultiTermNFKCTeacherAliasesAndRelevanceRanking
   DS-01:
+    - validation_inbox_test.go#TestUnicodeTargetRoundTripsThroughSearchAndActivity
     - integration_test.go#TestVisibilityPaginationAndHotTargets
     - popular_scale_test.go#TestPopularKeysetCursorSurvivesScoreChangeAndRemoval
+    - httpapi_contract_test.go#TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed
+    - index_collation_cursor_test.go#TestIndexOrderUnicodeCollationOpaqueCursorAndSchoolQueryRules
+    - error_window_test.go#TestErrorCodeEnumRetryAfterAndPopularWindowDays
+    - filter_summary_test.go#TestSummaryFieldsAndMultiDimensionalFilters
+    - resource_popular_recent_test.go#TestPopularResourcesAndRecentDiscovery
   DS-04:
     - integration_test.go#TestMyVotesHTTPAndTimeout
+    - httpapi_contract_test.go#TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed
+    - filter_summary_test.go#TestMyVotesSummaryFieldsAndBoundedPageFill
   DS-05:
+    - popular_scale_test.go#TestPopularFixedSnapshotRenewalExpiryAndRevocation
     - activity_test.go#TestHeatWeightsWindowAndTeachers
     - activity_test.go#TestActivityOwnership
     - popular_scale_test.go#TestPopularKeysetCursorSurvivesScoreChangeAndRemoval
     - popular_scale_test.go#TestPopularCampusScaleDisabledSourceAndLazyCurrent
+    - activity_test.go#TestPopularCountsNewerLiveActivityRevisionWithoutDroppingHotTargets
+    - resource_popular_recent_test.go#TestPopularResourcesAndRecentDiscovery
   DS-06:
     - integration_test.go#TestProjectionFailureRollback
     - activity_test.go#TestActivityReplayAndRebuild
+    - validation_inbox_test.go#TestUTF8NullValidationUnicodeLengthsAndInboxCanonicalDedup
   DS-07:
+    - validation_inbox_test.go#TestLegacyInboxReceiptsProtectBothEventTypes
+    - observability_maintenance_test.go#TestSanitizedObservationsAcrossSnapshotPages
     - integration_test.go#TestContentDocumentKinds
     - integration_test.go#TestProjectionReplayRebuildAndIsolation
     - activity_test.go#TestActivityReplayAndRebuild
     - activity_test.go#TestActivitySnapshotPagination
+    - rebuild_window_test.go#TestRebuildPreservesOutOfWindowActivitiesBatchesWritesAndDetectsCycles
+    - validation_inbox_test.go#TestUTF8NullValidationUnicodeLengthsAndInboxCanonicalDedup
+    - migration_runtime_test.go#TestIdempotentMigrateLockFreeAndStrictRuntimePrivilegeChecks
+    - observability_maintenance_test.go#TestObserverStatusAndBoundedMaintenanceCleanup
 
   DS-SCHOOL-01:
     - school_search_test.go#TestSchoolSearchCodesNamesAliasesCurrentRightsAndRebuild
     - school_search_test.go#TestSchoolProjectionMigrationPreservesExistingDocuments
+    - index_collation_cursor_test.go#TestIndexOrderUnicodeCollationOpaqueCursorAndSchoolQueryRules

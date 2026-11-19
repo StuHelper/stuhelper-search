@@ -255,3 +255,49 @@ func TestPopularCampusScaleDisabledSourceAndLazyCurrent(t *testing.T) {
 		t.Fatalf("expected ErrUnavailable for unrequested batch target, got %v", err)
 	}
 }
+
+func TestPopularFixedSnapshotRenewalExpiryAndRevocation(t *testing.T) {
+	svc, repo, f, _ := setup(t)
+	clock := now
+	cfg := s.Config{QueryTimeout: time.Second, HeatWindow: 7 * 24 * time.Hour, HeatWeights: [4]float64{1, 1, 1, 1}, MinimumHeatSamples: 1, Now: func() time.Time { return clock }}
+	svc, err := s.New(repo, f, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for idx, id := range []string{"a", "b", "c", "d"} {
+		add(t, svc, f, doc("catalog", "course", id))
+		addActivity(t, svc, f, activity("catalog", "course", id, "2026-11-09", map[string]int64{"views": int64(40 - 10*idx)}))
+	}
+	first, err := svc.Popular(ctx, "u", "course", "", 1)
+	if err != nil || first.Items[0].Target.ID != "a" {
+		t.Fatalf("first: %+v %v", first, err)
+	}
+	for id, views := range map[string]int64{"a": 1, "c": 60} {
+		v := activity("catalog", "course", id, "2026-11-09", map[string]int64{"views": views})
+		v.Revision++
+		addActivity(t, svc, f, v)
+	}
+	fresh, err := svc.Popular(ctx, "u", "course", "", 1)
+	if err != nil || fresh.Items[0].Target.ID != "c" {
+		t.Fatalf("refresh: %+v %v", fresh, err)
+	}
+	f.denied["u/b"] = true
+	clock = clock.Add(23 * time.Hour)
+	second, err := svc.Popular(ctx, "u", "course", first.NextCursor, 1)
+	if err != nil || len(second.Items) != 1 || second.Items[0].Target.ID != "c" {
+		t.Fatalf("fixed order with revoked b: %+v %v", second, err)
+	}
+	if _, err = svc.Popular(ctx, "other", "course", second.NextCursor, 1); !errors.Is(err, s.ErrInput) {
+		t.Fatalf("cursor principal: %v", err)
+	}
+	clock = clock.Add(23 * time.Hour)
+	third, err := svc.Popular(ctx, "u", "course", second.NextCursor, 5)
+	if err != nil || len(third.Items) != 1 || third.Items[0].Target.ID != "d" {
+		t.Fatalf("renewed snapshot: %+v %v", third, err)
+	}
+	clock = clock.Add(24 * time.Hour)
+	if _, err = svc.Popular(ctx, "u", "course", second.NextCursor, 1); !errors.Is(err, s.ErrSnapshotExpired) {
+		t.Fatalf("expired snapshot: %v", err)
+	}
+}
