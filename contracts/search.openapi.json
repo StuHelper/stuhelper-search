@@ -2,7 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "StuHelper Search",
-    "version": "0.4.0"
+    "version": "0.4.0",
+    "description": "提供按当前权限过滤的全站搜索、热门课程与教师排行及本人投票查询。"
   },
   "paths": {
     "/api/v1/search": {
@@ -14,7 +15,7 @@
             "name": "q",
             "in": "query",
             "required": false,
-            "description": "Trim surrounding whitespace. School numeric id/code queries match exactly; five digits also match the suffix of a ten-digit id/code. Names and registered aliases use case-insensitive literal substring matching.",
+            "description": "检索词最多 200 个字符。执行 NFKC 规范化，拆分至多五个词元组合匹配；非空查询按相关性排序。学校代码仅精确匹配或匹配允许的五位后缀，名称与登记别名可匹配数字子串。",
             "schema": {
               "type": "string",
               "maxLength": 200
@@ -24,7 +25,7 @@
             "name": "kind",
             "in": "query",
             "required": false,
-            "description": "kind",
+            "description": "限定检索的目标类型；省略时检索全部可见类型。",
             "schema": {
               "type": "string",
               "enum": [
@@ -37,30 +38,75 @@
             }
           },
           {
+            "name": "school_id",
+            "in": "query",
+            "required": false,
+            "description": "按所属学校 ID 过滤结果。",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "course_id",
+            "in": "query",
+            "required": false,
+            "description": "按关联的规范课程 ID 过滤评价或学习资料。",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "teacher_id",
+            "in": "query",
+            "required": false,
+            "description": "按关联的任课教师 ID 过滤课程、评价或学习资料。",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
             "name": "cursor",
             "in": "query",
             "required": false,
-            "description": "cursor",
+            "description": "上一页响应返回的 next_cursor 续页游标；首次请求省略或传空字符串。",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 2048
             }
           },
           {
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "limit",
+            "description": "单页最多返回的可见条目数，默认 20，范围 1–100。",
             "schema": {
               "type": "integer",
               "minimum": 1,
               "maximum": 100,
               "default": 20
             }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "排序模式：relevance 为默认稳定排序，recent 按内容公开时间降序浏览最新内容。",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "relevance",
+                "recent"
+              ],
+              "default": "relevance"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "按当前权限过滤的全站搜索",
+            "description": "当前请求人可见的搜索结果分页。",
             "content": {
               "application/json": {
                 "schema": {
@@ -70,7 +116,7 @@
             }
           },
           "400": {
-            "description": "invalid_input",
+            "description": "请求参数、游标或分页上限不合法（invalid_input）。",
             "content": {
               "application/json": {
                 "schema": {
@@ -80,7 +126,7 @@
             }
           },
           "401": {
-            "description": "unauthenticated",
+            "description": "请求未携带有效登录身份（unauthenticated）。",
             "content": {
               "application/json": {
                 "schema": {
@@ -90,7 +136,35 @@
             }
           },
           "404": {
-            "description": "not_found",
+            "description": "请求路径不存在（not_found）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "method_not_allowed",
+            "headers": {
+              "Allow": {
+                "description": "允许的 HTTP 方法列表（GET）。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "499": {
+            "description": "cancelled",
             "content": {
               "application/json": {
                 "schema": {
@@ -100,7 +174,15 @@
             }
           },
           "503": {
-            "description": "unavailable",
+            "description": "搜索索引正在初始化（index_building）或上游依赖暂不可用（unavailable）。",
+            "headers": {
+              "Retry-After": {
+                "description": "建议客户端自动重试前等待的秒数。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -110,7 +192,7 @@
             }
           },
           "504": {
-            "description": "timeout",
+            "description": "查询或回源复核超时（timeout）。",
             "content": {
               "application/json": {
                 "schema": {
@@ -125,7 +207,7 @@
             "bearerAuth": []
           }
         ],
-        "description": "课程同时按名称、课程号、曾用课程号、英文名和曾用名检索；每个结果返回当前规范课程 ID。"
+        "description": "学校 ID 与代码精确匹配，五位数字可匹配十位代码的后五位。名称、登记别名以及课程的英文名与曾用名支持字面子串匹配。搜索返回当前可见的规范目标。仅空 next_cursor 表示结束。"
       }
     },
     "/api/v1/search/popular": {
@@ -137,29 +219,41 @@
             "name": "kind",
             "in": "query",
             "required": true,
-            "description": "kind",
+            "description": "热门榜单目标类型（课程、教师或学习资料）。",
             "schema": {
               "type": "string",
               "enum": [
                 "course",
-                "teacher"
+                "teacher",
+                "resource"
               ]
+            }
+          },
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": false,
+            "description": "按所属学校 ID 过滤热门课程或教师。",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
             }
           },
           {
             "name": "cursor",
             "in": "query",
             "required": false,
-            "description": "cursor",
+            "description": "上一页响应返回的 next_cursor 续页游标；首次请求省略或传空字符串。",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 2048
             }
           },
           {
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "limit",
+            "description": "单页最多返回的可见条目数，默认 20，范围 1–100。",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -170,7 +264,7 @@
         ],
         "responses": {
           "200": {
-            "description": "配置窗口内活动加权排行，同分按来源和 ID 排序",
+            "description": "配置时间窗口内的热门目标分页及窗口天数。",
             "content": {
               "application/json": {
                 "schema": {
@@ -180,7 +274,7 @@
             }
           },
           "400": {
-            "description": "invalid_input",
+            "description": "榜单类型、游标或分页上限不合法（invalid_input）。",
             "content": {
               "application/json": {
                 "schema": {
@@ -190,7 +284,7 @@
             }
           },
           "401": {
-            "description": "unauthenticated",
+            "description": "请求未携带有效登录身份（unauthenticated）。",
             "content": {
               "application/json": {
                 "schema": {
@@ -200,7 +294,35 @@
             }
           },
           "404": {
-            "description": "not_found",
+            "description": "请求路径不存在（not_found）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "method_not_allowed",
+            "headers": {
+              "Allow": {
+                "description": "允许的 HTTP 方法列表（GET）。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "499": {
+            "description": "cancelled",
             "content": {
               "application/json": {
                 "schema": {
@@ -210,7 +332,15 @@
             }
           },
           "503": {
-            "description": "unavailable",
+            "description": "搜索索引正在初始化（index_building）或活动来源暂不可用（unavailable）。",
+            "headers": {
+              "Retry-After": {
+                "description": "建议客户端自动重试前等待的秒数。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -220,7 +350,17 @@
             }
           },
           "504": {
-            "description": "timeout",
+            "description": "热门汇总或回源复核超时（timeout）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "排名快照已过期，刷新以读取最新热榜（snapshot_expired）。",
             "content": {
               "application/json": {
                 "schema": {
@@ -234,7 +374,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。 同次翻页固定首屏排名，每页按当前权限返回内容。最后一次翻页满 24 小时后返回 410 snapshot_expired，需主动刷新。"
       }
     },
     "/api/v1/search/my-votes": {
@@ -246,16 +387,17 @@
             "name": "cursor",
             "in": "query",
             "required": false,
-            "description": "cursor",
+            "description": "上一页响应返回的 next_cursor 续页游标；首次请求省略或传空字符串。",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 1024
             }
           },
           {
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "limit",
+            "description": "单页最多返回的有效投票条数，默认 20，范围 1–100。",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -266,7 +408,7 @@
         ],
         "responses": {
           "200": {
-            "description": "请求人当前有效投票，通过 reviews 公开接口读取",
+            "description": "请求人当前可见的有效投票分页。",
             "content": {
               "application/json": {
                 "schema": {
@@ -276,7 +418,7 @@
             }
           },
           "400": {
-            "description": "invalid_input",
+            "description": "游标或分页上限不合法（invalid_input）。",
             "content": {
               "application/json": {
                 "schema": {
@@ -286,7 +428,7 @@
             }
           },
           "401": {
-            "description": "unauthenticated",
+            "description": "请求未携带有效登录身份（unauthenticated）。",
             "content": {
               "application/json": {
                 "schema": {
@@ -296,7 +438,35 @@
             }
           },
           "404": {
-            "description": "not_found",
+            "description": "请求路径不存在（not_found）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "method_not_allowed",
+            "headers": {
+              "Allow": {
+                "description": "允许的 HTTP 方法列表（GET）。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "499": {
+            "description": "cancelled",
             "content": {
               "application/json": {
                 "schema": {
@@ -306,7 +476,15 @@
             }
           },
           "503": {
-            "description": "unavailable",
+            "description": "评价来源暂不可用（unavailable）。",
+            "headers": {
+              "Retry-After": {
+                "description": "建议客户端自动重试前等待的秒数。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -316,7 +494,7 @@
             }
           },
           "504": {
-            "description": "timeout",
+            "description": "投票查询或权限复核超时（timeout）。",
             "content": {
               "application/json": {
                 "schema": {
@@ -330,7 +508,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "读取请求人在 reviews 中的有效投票并逐条复核当前评价可见性。过滤不可见评价后单页 items 可能少于 limit，仅当 next_cursor 为空字符串时表示分页结束。"
       }
     }
   },
@@ -339,9 +518,11 @@
       "Target": {
         "type": "object",
         "additionalProperties": false,
+        "description": "跨模块公开目标引用。",
         "properties": {
           "source": {
             "type": "string",
+            "description": "拥有目标事实的业务模块。",
             "enum": [
               "catalog",
               "reviews",
@@ -349,10 +530,12 @@
             ]
           },
           "id": {
-            "type": "string"
+            "type": "string",
+            "description": "目标在所属模块中的规范公开 ID。"
           },
           "kind": {
             "type": "string",
+            "description": "目标业务对象类型。",
             "enum": [
               "school",
               "course",
@@ -371,15 +554,18 @@
       "Item": {
         "type": "object",
         "additionalProperties": false,
+        "description": "经当前权限复核后的公开搜索或热门结果条目。",
         "properties": {
           "target": {
             "$ref": "#/components/schemas/Target"
           },
           "title": {
-            "type": "string"
+            "type": "string",
+            "description": "目标公开标题或名称。"
           },
           "school_id": {
-            "type": "string"
+            "type": "string",
+            "description": "目标所属学校 ID。"
           },
           "english_name": {
             "type": "string",
@@ -412,6 +598,28 @@
             "type": "string",
             "maxLength": 128,
             "description": "课程当前课程号或学校代码。"
+          },
+          "course_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "评价或学习资料关联的规范课程 ID；无关联时省略。"
+          },
+          "teacher_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": "关联的任课教师 ID 列表；无关联时省略。"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "内容公开时间（UTC）。"
           }
         },
         "required": [
@@ -426,32 +634,60 @@
         "properties": {
           "items": {
             "type": "array",
+            "description": "本页通过权限复核的可见条目列表；过滤隐藏记录后长度可能小于 limit。",
             "items": {
               "$ref": "#/components/schemas/Item"
             }
           },
           "next_cursor": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 2048,
+            "description": "下一页游标；仅当为空字符串时表示已到达末尾，非空时即使 items 为空仍可能存在后续页。"
+          },
+          "window_days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 366,
+            "description": "热门排行统计覆盖的配置时间窗口天数；仅热门接口返回，搜索接口省略。"
           }
         },
         "required": [
           "items",
           "next_cursor"
-        ]
+        ],
+        "description": "搜索或热门排行分页响应。"
       },
       "Vote": {
         "type": "object",
         "additionalProperties": false,
+        "description": "请求人对单条课程评价的当前有效投票。",
         "properties": {
           "target": {
             "$ref": "#/components/schemas/Target"
           },
           "choice": {
             "type": "string",
+            "description": "投票态度：up 为赞同，down 为反对。",
             "enum": [
               "up",
               "down"
             ]
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "评价公开检索标题。"
+          },
+          "course_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "评价所属规范课程 ID。"
+          },
+          "school_id": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "评价所属学校 ID。"
           }
         },
         "required": [
@@ -465,30 +701,47 @@
         "properties": {
           "items": {
             "type": "array",
+            "description": "本页当前可见的有效投票。过滤已撤回或无权限的目标后，条数可能少于 limit。",
             "items": {
               "$ref": "#/components/schemas/Vote"
             }
           },
           "next_cursor": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 1024,
+            "description": "下一页游标；仅当为空字符串时表示分页结束。"
           }
         },
         "required": [
           "items",
           "next_cursor"
-        ]
+        ],
+        "description": "我的投票分页响应。"
       },
       "Error": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "code": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "invalid_input",
+              "unauthenticated",
+              "not_found",
+              "method_not_allowed",
+              "unavailable",
+              "timeout",
+              "cancelled",
+              "index_building",
+              "snapshot_expired"
+            ],
+            "description": "稳定错误码，包含参数非法、未登录、路径或方法不支持、索引构建中、依赖不可用、超时及请求取消。"
           }
         },
         "required": [
           "code"
-        ]
+        ],
+        "description": "稳定错误响应体，供客户端映射多语言文案与无障碍状态提示。"
       }
     },
     "securitySchemes": {

@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	s "github.com/StuHelper/stuhelper-search"
+	"time"
 )
 
 func putActivity(ctx context.Context, tx *sql.Tx, d s.ActivitySnapshot, equal bool) error {
@@ -19,42 +19,40 @@ func putActivity(ctx context.Context, tx *sql.Tx, d s.ActivitySnapshot, equal bo
 	return e
 }
 func (r *Repository) ApplyActivity(ctx context.Context, event s.ActivityEvent, digest string) error {
-	tx, e := r.DB.BeginTx(ctx, nil)
-	if e != nil {
-		return safe(e)
-	}
-	defer tx.Rollback()
-	if e = lock(ctx, tx); e != nil {
-		return safe(e)
-	}
-	var old string
-	e = tx.QueryRowContext(ctx, "SELECT digest FROM search.inbox WHERE source=$1 AND id=$2", event.Source, event.ID).Scan(&old)
-	if e == nil {
-		if old != digest {
-			return s.ErrConflict
-		}
-		return nil
-	}
-	if !errors.Is(e, sql.ErrNoRows) {
-		return safe(e)
-	}
-	if e = putActivity(ctx, tx, event.Data, false); e != nil {
-		return safe(e)
-	}
-	if _, e = tx.ExecContext(ctx, "INSERT INTO search.inbox(source,id,digest) VALUES($1,$2,$3)", event.Source, event.ID, digest); e != nil {
-		return safe(e)
-	}
-	return safe(tx.Commit())
+	return r.withInboxTx(ctx, event.Source, event.Type, event.ID, digest, event, func(tx *sql.Tx) error {
+		return putActivity(ctx, tx, event.Data, false)
+	})
 }
 func (r *Repository) Activities(ctx context.Context, f s.ActivityFilter) ([]s.ActivitySnapshot, error) {
-	if f.Limit < 1 || f.Limit > 100 {
+	afterSource, afterID, ok := splitAfter(f.After)
+	if !ok || f.Limit < 1 || f.Limit > 500 || !validDBString(f.Kind) || !validDBString(f.After) {
 		return nil, s.ErrInput
 	}
 	var ready bool
-	if e := r.DB.QueryRowContext(ctx, "SELECT ready FROM search.state WHERE id").Scan(&ready); e != nil || !ready {
-		return nil, s.ErrUnavailable
+	if e := r.DB.QueryRowContext(ctx, "SELECT ready FROM search.state WHERE id").Scan(&ready); e != nil {
+		return nil, safe(e)
 	}
-	rows, e := r.DB.QueryContext(ctx, `SELECT data FROM search.activities WHERE kind=$1 AND day>=$2 AND day<$3 AND source||'/'||id>$4 AND (data->>'visible')::boolean ORDER BY source||'/'||id LIMIT $5`, f.Kind, f.From, f.To, f.After, f.Limit)
+	if !ready {
+		return nil, s.ErrIndexBuilding
+	}
+	var rows *sql.Rows
+	var e error
+	excluded := f.ExcludeSources
+	if excluded == nil {
+		excluded = []string{}
+	}
+	if f.AfterDay == "" {
+		rows, e = r.DB.QueryContext(ctx, `SELECT data FROM search.activities WHERE kind=$1 AND day>=$2 AND day<$3 AND (source COLLATE "C", id COLLATE "C") > ($4 COLLATE "C", $5 COLLATE "C") AND (data->>'visible')::boolean AND NOT (source=ANY($7::text[])) ORDER BY source COLLATE "C", id COLLATE "C" LIMIT $6`, f.Kind, f.From, f.To, afterSource, afterID, f.Limit, excluded)
+	} else {
+		day, err := time.Parse(time.DateOnly, f.AfterDay)
+		if err != nil || day.Before(f.From.UTC()) || !day.Before(f.To.UTC()) {
+			return nil, s.ErrInput
+		}
+		rows, e = r.DB.QueryContext(ctx, `SELECT data FROM search.activities
+ WHERE kind=$1 AND day >= $2 AND day < $3 AND (data->>'visible')::boolean
+ AND (day,source COLLATE "C",id COLLATE "C") > ($4::date,$5 COLLATE "C",$6 COLLATE "C")
+ AND NOT (source=ANY($8::text[])) ORDER BY day,source COLLATE "C",id COLLATE "C" LIMIT $7`, f.Kind, f.From, f.To, f.AfterDay, afterSource, afterID, f.Limit, excluded)
+	}
 	if e != nil {
 		return nil, safe(e)
 	}

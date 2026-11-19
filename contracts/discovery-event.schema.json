@@ -105,7 +105,8 @@
         },
         "code": {
           "type": "string",
-          "maxLength": 128
+          "maxLength": 128,
+          "description": "学校代码或课程公开课程号。"
         },
         "aliases": {
           "type": "array",
@@ -113,7 +114,8 @@
           "items": {
             "type": "string",
             "maxLength": 256
-          }
+          },
+          "description": "学校、课程或教师的公开检索别名与拼音缩写。"
         },
         "english_name": {
           "type": "string",

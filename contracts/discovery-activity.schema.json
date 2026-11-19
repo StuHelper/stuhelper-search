@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/StuHelper/stuhelper-search/contracts/discovery-activity.schema.json",
   "title": "Discovery activity event",
-  "x-schema-version": "1.0.0",
+  "x-schema-version": "1.2.0",
   "oneOf": [
     {
       "type": "object",
@@ -25,7 +25,7 @@
         "subject": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 512
+          "maxLength": 1086
         },
         "time": {
           "type": "string",
@@ -41,7 +41,7 @@
             "id": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 512
+              "maxLength": 1086
             },
             "target": {
               "type": "object",
@@ -137,7 +137,7 @@
         "subject": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 512
+          "maxLength": 1086
         },
         "time": {
           "type": "string",
@@ -153,7 +153,7 @@
             "id": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 512
+              "maxLength": 1086
             },
             "target": {
               "type": "object",
@@ -255,7 +255,7 @@
         "subject": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 512
+          "maxLength": 1087
         },
         "time": {
           "type": "string",
@@ -271,31 +271,57 @@
             "id": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 512
+              "maxLength": 1087
             },
             "target": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "source": {
-                  "const": "catalog"
-                },
-                "kind": {
-                  "enum": [
-                    "course",
-                    "teacher"
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "source": {
+                      "const": "catalog"
+                    },
+                    "kind": {
+                      "enum": [
+                        "course",
+                        "teacher"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "kind",
+                    "id"
                   ]
                 },
-                "id": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 200
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "source": {
+                      "const": "resources"
+                    },
+                    "kind": {
+                      "const": "resource"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "kind",
+                    "id"
+                  ]
                 }
-              },
-              "required": [
-                "source",
-                "kind",
-                "id"
               ]
             },
             "day": {
