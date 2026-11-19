@@ -10,19 +10,37 @@ updated: 2026-11-19
 
 OpenAPI 版本为 0.4.0，提供 `/api/v1/search`、`/api/v1/search/popular` 和 `/api/v1/search/my-votes` 三个 GET 接口。Go SDK 与 TypeScript 类型由接口定义生成。
 
+错误响应 `Error.code` 使用固定枚举（`invalid_input`、`unauthenticated`、`not_found`、`snapshot_expired`、`index_building`、`unavailable`、`timeout`）；首次部署尚未完成重建时返回 `503 index_building`，所有 `503` 响应携带 `Retry-After` 头供客户端重试与多语言状态提示。
+
 search 通过来源公开事件构建可重建投影，索引只保存公开标题、来源 ID、修订号、学校、归属关系、活动计数及可见状态。search 不读取其他模块业务表，不保存评价正文、作者身份或五维评分数据。
 
 HTTP 请求要求登录。身份服务暂不可用或超时分别返回 503 或 504，客户端主动取消返回 499，不伪报为 401。非 GET 方法返回 405 与 Allow: GET。查询串严格校验编码与参数白名单，畸形或未知参数返回 400。Sources.Current 根据可信请求人复核当前权限及可见状态，修订不一致暂不展示，来源故障返回 503。
 
-搜索按字面子串匹配，支持多语言大小写折叠，以来源和 ID 的字节序稳定分页。每页默认 20 条，上限 100。搜索及热门游标与请求人和接口绑定，最多 2,048 字符。仅空游标表示结束，达到扫描或时间预算时可以返回短页。热门排行超过扫描上限时返回暂不可用。
+首次读取按热度降序、来源和对象 ID 升序固定排名。单项权重上限为 1e9。样本量按有效计数之和计算。游标绑定请求人、学校和榜单类型，后续各页按首屏顺序读取，逐页检查当前可见性。响应使用 window_days 表示统计窗口。
+
+每次成功续页延长 24 小时有效期。过期时返回 410 snapshot_expired，界面提示主动刷新。刷新后重新计算排名。每个快照最多保存 10000 个目标，每个数据库最多保存 1024 个快照，新快照可复用过期位置。
+
+使用 `sort=recent` 时，候选按内容时间降序排列，同一时间按来源和 ID 的字节序排列。游标只能用于原排序模式。
+
+默认模式下，非空查询按相关性分桶排序（代码或标题完全一致、标题或代码前缀匹配、标题包含、别名或曾用字段包含），同桶内按类型优先级与 `(source, id)` 字节序稳定排序；空查询保持按 `(source, id)` 排序。
+
+每页默认 20 条，上限 100。游标记录已检查候选的分桶与位置，不暴露隐藏记录总量。一次最多检查 10000 条候选，搜索通过游标继续，热门排行超过上限返回暂不可用。
+
+每页默认 20 条，上限 100。加密游标与请求人和接口绑定，上限 2,048 字符。仅空游标表示结束；达到扫描或时间预算时可返回短页。非空查询改用相关性排序后，旧顺序的游标需要重新从首页查询。
+
+搜索支持按学校、课程和教师组合过滤。热门排行可按学校过滤。
+
+搜索与热门结果的 `Item` 从已通过当前权限核验的对象返回公开 `code`、`course_id`、`teacher_ids` 与 `at` 摘要，不含评价正文或原始评分。
 
 查询超时由装配配置，必须大于零且不超过 30 秒，包含数据库和来源调用。来源适配器必须传递 context。重建总超时可配置（默认两分钟，上限 30 分钟），每批最多 100 条，每个来源最多 10000 批。
 
 课程与教师的五维评分统计由 reviews 的 `GET /api/v1/reviews/statistics` 提供，时间范围、最低评分样本量及教师按课程等权汇总均由 reviews 执行。客户端对 2–5 门课程分别读取 reviews 统计，组合展示课程对比。
 
-我的投票委托 reviews 的当前请求人公开接口，只返回有效选择并再次检查目标权限，修改及取消使用 reviews 自身接口。
+我的投票委托 reviews 的当前请求人公开接口，只返回有效选择并再次检查目标权限，附带公开评价标题、关联课程 ID 与学校 ID。遇到已撤回或无权限评价时，单次请求最多扫描 500 条上游投票自动补齐页长。修改及取消使用 reviews 自身接口。
 
-热门排行按对象汇总窗口内各来源的日快照，再用后台权重计算热度。权重顺序为浏览、评价、收藏、互动。最低样本量使用四项有效计数之和，与权重无关。按加权热度降序，同分按来源和对象 ID 排序。
+首次读取按热度降序、来源和对象 ID 升序固定排名。单项权重上限为 1e9。样本量按有效计数之和计算。游标绑定请求人、学校和榜单类型，后续各页按首屏顺序读取，逐页检查当前可见性。响应使用 window_days 表示统计窗口。
+
+每次成功续页延长 24 小时有效期。过期时返回 410 snapshot_expired，界面提示主动刷新。刷新后重新计算排名。每个快照最多保存 10000 个目标，每个数据库最多保存 1024 个快照，新快照可复用过期位置。
 
 窗口按 UTC 日查询，开始为 now−HeatWindow 所在日的零点（包含），结束为当前日之后的零点（不包含）。当前日使用已提交快照，窗口参数和当前时间在单次查询或重建开始时固定。
 
@@ -38,13 +56,15 @@ Service.Consume 接收 CloudEvents 1.0，source 为 catalog、reviews 或 resour
 
 所有检索词、游标和事件字符串均按 Unicode 码点数限长，并拒绝非法 UTF-8 与 NUL 字节。重复事件返回成功，相同标识不同载荷拒绝。低于或等于现有修订的事件只记 inbox，不改投影。删除必须保留高修订的不可见墓碑。
 
-活动使用独立事件 `discovery.activity.v1`。Schema 为 `contracts/discovery-activity.schema.json`，版本 1.1.0；相邻 `.sha256` 文件记录原始 UTF-8 文件的 SHA-256，完整检查验证摘要及字段归属。内容事件仅承载检索文档。
+活动使用独立事件 `discovery.activity.v1`。Schema 为 `contracts/discovery-activity.schema.json`，版本 1.2.0；相邻 `.sha256` 文件记录原始 UTF-8 文件的 SHA-256，完整检查验证摘要及字段归属。内容事件仅承载检索文档。
 
-活动快照保存在 search.activities，主键为 (source, id)，另以 (source, target.kind, target.id, day) 设置唯一约束。target.source 固定为 catalog，目标为一个规范课程或教师；课程活动不会自动复制到关联教师。
+活动快照保存在 search.activities，主键为 (source, id)，另以 (source, target.kind, target.id, day) 设置唯一约束。课程活动不会自动复制到关联教师。
+
+catalog 与 reviews 活动的目标为 catalog 的规范课程或教师；favorites 活动同时支持 resources 的学习资料，供 `Popular` 的 `kind=resource` 榜单汇总并经 `Sources.Current` 复核当前可见性。
 
 活动 ID 使用 `kind + "/" + base64url(UTF-8 对象 ID，无填充) + "/" + YYYY-MM-DD`，由 ActivityID 生成。事件 subject 等于活动 ID，封套 source 必须等于快照 source。不同来源可使用相同活动 ID，修订独立递增。
 
-活动目标 ID 最多 200 个 Unicode 码点。完整活动 ID 和 subject 最多 1,086 个字符，覆盖四字节码点编码后的长度。搜索与热门游标最多 2,048 字符。升级前的 inbox 回执继续按原事件表示计算摘要，并保留原来源与 ID 的去重范围。
+活动目标 ID 最多 200 个 Unicode 码点。完整活动 ID 和 subject 最多 1,087 个字符，覆盖四字节码点编码后的长度。搜索与热门游标最多 2,048 字符。升级前的 inbox 回执继续按原事件表示计算摘要，并保留原来源与 ID 的去重范围。
 
 新修订完整替换同键快照，不把重复投递当作增量相加。零计数也必须显式发送。取消收藏、撤回或删除引起计数变化时，由拥有事实的模块发布更高修订；search 不反推来源事实。
 
@@ -66,7 +86,11 @@ search.documents 只保存 catalog 的 school、course、teacher，reviews 的 r
 
 重建与查询使用 PostgreSQL 事务隔离，查询保留旧的已提交投影，只有完整重建才发布新投影。失败整体回滚，低于已消费修订的快照拒绝。缺失对象保留不可见墓碑，延迟到达的旧事件无法复活内容。
 
-初次部署需要成功重建后才能查询。重建后的事件通过 relay 继续消费。inbox 与墓碑当前不自动清理，清理策略必须先确认来源重放期限。正常索引更新目标为 60 秒，尚未进行端到端延迟验证。
+初次部署需要成功重建后才能查询。`Service.Status` 与 `postgres.Repository.Status` 返回 `ready`、最近重建时间与窗口、各来源投影及 `inbox` 计数。`Config.Observer` 记录脱敏耗时、来源模块、错误分类码、扫描行数与修订跳过数，不记录查询词或用户身份。
+
+`search.inbox` 记录 `received_at` 时间。`postgres.Maintenance` 使用独立维护身份（仅授予 `inbox` 与 `activities` 的 `SELECT`、`DELETE`），按每批最多 1000 条、3 秒超时有界清理严格早于截止时间的回执与超窗活动快照。
+
+清理截止时间禁止落入 24 小时重放窗口与 366 天最大热度窗口内。正常索引更新目标为 60 秒，尚未进行端到端延迟验证。
 
 ## 来源事件与公开接口
 
@@ -91,7 +115,11 @@ Sources 是 backend 的来源分发适配器，source 参数选择提供方。�
 DiscoverySnapshot(ctx context.Context, source, cursor string, limit int) ([]Document, string, error)
 ActivitySnapshot(ctx context.Context, source string, fromDay, toDay time.Time, cursor string, limit int) ([]ActivitySnapshot, string, error)
 CurrentActivity(ctx context.Context, principal, source, activityID string) (ActivitySnapshot, bool, error)
+CurrentBatch(ctx context.Context, user, source string, targets []Target) ([]Document, error)
+CurrentActivities(ctx context.Context, user, source string, ids []string) ([]ActivitySnapshot, error)
 ```
+
+CurrentBatch 与 CurrentActivities 为可选批量扩展接口，每批最多 100 条；未实现时回退到单条接口。单次热门查询首次遇到来源返回 ErrSourceDisabled 后，后续数据库分页直接跳过该来源且不计入扫描配额。
 
 catalog、reviews、favorites 各自实现以下提供方端口。source 由模块固定，不能接受调用方指定其他来源。分页后续请求沿用原窗口、快照版本和上限；来源查询通过公开 Repository/Service 接口提供。
 
@@ -118,12 +146,12 @@ relay、生产模块 outbox 与公开接口适配器由 backend 及来源负责�
 
 ## 验证范围
 
-scenario_tests 登记 DS-01、DS-04 至 DS-07、DS-SCHOOL-01 与 DS-COURSE-01。集成测试使用隔离 PostgreSQL，覆盖权限过滤、分页、热度权重与窗口、热门动态翻页、当前投票、多源并发共享锁消费、旧修订、重建回滚、SDK 端到端契约及运行身份越权拒绝。
+scenario_tests 登记 DS-01、DS-04 至 DS-07、DS-SCHOOL-01 与 DS-COURSE-01。集成测试使用隔离 PostgreSQL，覆盖权限过滤、分页、热度权重与窗口、热榜快照翻页、当前投票、多源并发共享锁消费、旧修订、重建回滚、SDK 端到端契约及运行身份越权拒绝。
 
 | 场景 | 验收结果 | 测试函数 |
 | --- | --- | --- |
-| DS-01：搜索与热门进入详情 | 当前权限过滤、分页游标、热门课程与教师动态续页及 SDK 契约一致 | TestVisibilityPaginationAndHotTargets、TestSDKEndToEndContractAndPopularDynamicPagination |
-| DS-04：我的投票 | 仅返回当前请求人有效且目标可见的投票，超限及超时按契约响应 | TestMyVotesHTTPAndTimeout、TestSDKEndToEndContractAndPopularDynamicPagination |
+| DS-01：搜索与热门进入详情 | 当前权限过滤、分页游标、热门课程与教师固定排名续页及 SDK 契约一致 | TestVisibilityPaginationAndHotTargets、TestSDKEndToEndContractAndPopularSnapshotPagination |
+| DS-04：我的投票 | 仅返回当前请求人有效且目标可见的投票，超限及超时按契约响应 | TestMyVotesHTTPAndTimeout、TestSDKEndToEndContractAndPopularSnapshotPagination |
 | DS-05：热度配置 | 多来源汇总、来源缺失、权重、UTC 窗口、最低样本量及权限生效，越权指标拒绝 | TestHeatWeightsWindowAndTeachers、TestActivityOwnership |
 | DS-06：投影写入失败 | 投影与 inbox 事务整体回滚，不保留部分写入 | TestProjectionFailureRollback、TestActivityReplayAndRebuild |
 | DS-07：重复乱序与重建 | 重复事件去重，多来源共享锁并发写入与排他锁重建隔离，旧修订不覆盖新状态，运行身份越权拒绝 | TestContentDocumentKinds、TestProjectionReplayRebuildAndIsolation、TestActivityReplayAndRebuild、TestActivitySnapshotPagination、TestSharedAdvisoryLockAllowsConcurrentMultiSourceWrites |

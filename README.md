@@ -6,7 +6,7 @@ search 提供学校代码、名称与别名检索，课程（含课程号、曾�
 
 OpenAPI 版本为 0.4.0，接口定义位于 [contracts/search.openapi.json](contracts/search.openapi.json)，Go 和 TypeScript SDK 位于 `sdk/`。详细数据约定、事件协议及装配方式见 [模块说明](docs/spec/search.md)。
 
-内容投影事件契约见 [contracts/discovery-event.schema.json](contracts/discovery-event.schema.json)；热门活动由 catalog（浏览）、reviews（评价与互动）、favorites（收藏）分别提供日快照，契约见 [contracts/discovery-activity.schema.json](contracts/discovery-activity.schema.json)（1.1.0），两份 Schema 摘要均记录于相邻 `.sha256` 文件并由模块检查校验。
+内容投影事件契约见 [contracts/discovery-event.schema.json](contracts/discovery-event.schema.json)；热门活动由 catalog（浏览）、reviews（评价与互动）、favorites（收藏）分别提供日快照，契约见 [contracts/discovery-activity.schema.json](contracts/discovery-activity.schema.json)（1.2.0），两份 Schema 摘要均记录于相邻 `.sha256` 文件并由模块检查校验。
 
 ```bash
 pnpm install --frozen-lockfile

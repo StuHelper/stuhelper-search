@@ -17,8 +17,8 @@ type Handler struct {
 }
 
 var routeParams = map[string]map[string]bool{
-	"/api/v1/search":          {"q": true, "kind": true, "cursor": true, "limit": true},
-	"/api/v1/search/popular":  {"kind": true, "cursor": true, "limit": true},
+	"/api/v1/search":          {"sort": true, "q": true, "school_id": true, "course_id": true, "teacher_id": true, "kind": true, "cursor": true, "limit": true},
+	"/api/v1/search/popular":  {"school_id": true, "kind": true, "cursor": true, "limit": true},
 	"/api/v1/search/my-votes": {"cursor": true, "limit": true},
 }
 
@@ -75,9 +75,23 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var out any
 	switch r.URL.Path {
 	case "/api/v1/search":
-		out, e = h.Service.Search(r.Context(), user, q.Get("q"), q.Get("kind"), q.Get("cursor"), limit)
+		out, e = h.Service.SearchWithParams(r.Context(), user, s.SearchParams{
+			Sort:      q.Get("sort"),
+			Query:     q.Get("q"),
+			Kind:      q.Get("kind"),
+			SchoolID:  q.Get("school_id"),
+			CourseID:  q.Get("course_id"),
+			TeacherID: q.Get("teacher_id"),
+			Cursor:    q.Get("cursor"),
+			Limit:     limit,
+		})
 	case "/api/v1/search/popular":
-		out, e = h.Service.Popular(r.Context(), user, q.Get("kind"), q.Get("cursor"), limit)
+		out, e = h.Service.PopularWithParams(r.Context(), user, s.PopularParams{
+			Kind:     q.Get("kind"),
+			SchoolID: q.Get("school_id"),
+			Cursor:   q.Get("cursor"),
+			Limit:    limit,
+		})
 	case "/api/v1/search/my-votes":
 		out, e = h.Service.MyVotes(r.Context(), user, q.Get("cursor"), limit)
 	}
@@ -100,6 +114,9 @@ func fail(w http.ResponseWriter, r *http.Request, e error) {
 	code := http.StatusServiceUnavailable
 	name := "unavailable"
 	switch {
+	case errors.Is(e, s.ErrSnapshotExpired):
+		code = http.StatusGone
+		name = "snapshot_expired"
 	case errors.Is(e, s.ErrInput):
 		code = http.StatusBadRequest
 		name = "invalid_input"
@@ -109,6 +126,10 @@ func fail(w http.ResponseWriter, r *http.Request, e error) {
 	case errors.Is(e, s.ErrNotFound):
 		code = http.StatusNotFound
 		name = "not_found"
+	case errors.Is(e, s.ErrIndexBuilding):
+		code = 503
+		name = "index_building"
+		w.Header().Set("Retry-After", "10")
 	case errors.Is(e, context.Canceled) && r != nil && errors.Is(r.Context().Err(), context.Canceled):
 		// Client aborted the in-flight request (e.g. AbortController); avoid polluting 5xx metrics.
 		code = 499
@@ -116,6 +137,8 @@ func fail(w http.ResponseWriter, r *http.Request, e error) {
 	case errors.Is(e, context.DeadlineExceeded) && (r == nil || !errors.Is(r.Context().Err(), context.Canceled)):
 		code = http.StatusGatewayTimeout
 		name = "timeout"
+	default:
+		w.Header().Set("Retry-After", "5")
 	}
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(map[string]string{"code": name})

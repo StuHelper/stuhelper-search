@@ -133,9 +133,9 @@ func put(ctx context.Context, tx *sql.Tx, d s.Document, equal bool) error {
 	if e != nil {
 		return e
 	}
-	_, e = tx.ExecContext(ctx, `INSERT INTO search.documents(source,id,revision,data) VALUES($1,$2,$3,$4)
- ON CONFLICT(source,id) DO UPDATE SET revision=EXCLUDED.revision,data=EXCLUDED.data
- WHERE search.documents.revision < EXCLUDED.revision OR ($5 AND search.documents.revision=EXCLUDED.revision)`, d.Target.Source, d.Target.ID, d.Revision, b, equal)
+	_, e = tx.ExecContext(ctx, `INSERT INTO search.documents(source,id,revision,at_utc,data) VALUES($1,$2,$3,$4,$5)
+ ON CONFLICT(source,id) DO UPDATE SET revision=EXCLUDED.revision,at_utc=EXCLUDED.at_utc,data=EXCLUDED.data
+ WHERE search.documents.revision < EXCLUDED.revision OR ($6 AND search.documents.revision=EXCLUDED.revision)`, d.Target.Source, d.Target.ID, d.Revision, d.At.UTC(), b, equal)
 	return e
 }
 
@@ -176,45 +176,147 @@ func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, 
 		return nil, safe(e)
 	}
 	if !ready {
-		return nil, s.ErrUnavailable
+		return nil, s.ErrIndexBuilding
 	}
-	afterSource, afterID, ok := splitAfter(f.After)
-	if !ok || f.Limit < 1 || f.Limit > 100 || !validDBString(f.Query) || !validDBString(f.After) || !validDBString(f.Kind) {
+	if (f.Sort != "" && f.Sort != "relevance" && f.Sort != "recent") || f.Limit < 1 || f.Limit > 100 || !validDBString(f.Query) || !validDBString(f.After) || !validDBString(f.Kind) || !validDBString(f.SchoolID) || !validDBString(f.CourseID) || !validDBString(f.TeacherID) {
 		return nil, s.ErrInput
 	}
+	normQ, terms := s.NormalizeQuery(f.Query)
+	if terms == nil {
+		terms = []string{}
+	}
+	var afterBucket, afterKindRank int
+	var afterSource, afterID string
+	var afterAt time.Time
+	var hasCursor bool
+	var e error
+	if f.Sort == "recent" {
+		afterAt, afterSource, afterID, hasCursor, e = s.ParseRecentAfter(f.After)
+	} else {
+		afterBucket, afterKindRank, afterSource, afterID, hasCursor, e = s.ParseSearchAfter(f.After, normQ != "")
+	}
+	if e != nil {
+		return nil, e
+	}
 	// Parameterized substring search gives literal semantics for %, _ and backslashes.
-	// COLLATE "pg_c_utf8" ensures Unicode case folding in any cluster locale; COLLATE "C" matches Go byte ordering.
-	rows, e := r.DB.QueryContext(ctx, `SELECT data FROM search.documents
-	 WHERE (data->>'visible')::boolean
-	   AND (source COLLATE "C", id COLLATE "C") > ($1 COLLATE "C", $2 COLLATE "C")
-	   AND ($3 = '' OR CASE data->'target'->>'kind'
-	     WHEN 'school' THEN
-	       id = $3
-	       OR lower((data->>'code') COLLATE "pg_c_utf8") = lower($3 COLLATE "pg_c_utf8")
-	       OR ($3 ~ '^[0-9]{5}$' AND ((id ~ '^[0-9]{10}$' AND right(id, 5) = $3) OR (data->>'code' ~ '^[0-9]{10}$' AND right(data->>'code', 5) = $3)))
-	       OR position(lower($3 COLLATE "pg_c_utf8") in lower((data->>'title') COLLATE "pg_c_utf8")) > 0
-	       OR EXISTS (
-	         SELECT 1 FROM jsonb_array_elements_text(COALESCE(NULLIF(data->'aliases', 'null'::jsonb), '[]'::jsonb)) alias
-	         WHERE position(lower($3 COLLATE "pg_c_utf8") in lower(alias COLLATE "pg_c_utf8")) > 0
-	       )
-	     WHEN 'course' THEN
-	       position(lower($3 COLLATE "pg_c_utf8") in lower((data->>'title') COLLATE "pg_c_utf8")) > 0
-	       OR position(lower($3 COLLATE "pg_c_utf8") in lower((data->>'code') COLLATE "pg_c_utf8")) > 0
-	       OR position(lower($3 COLLATE "pg_c_utf8") in lower((data->>'english_name') COLLATE "pg_c_utf8")) > 0
-	       OR EXISTS (
-	         SELECT 1 FROM jsonb_array_elements_text(
-	           COALESCE(NULLIF(data->'aliases', 'null'::jsonb), '[]'::jsonb)
-	           || COALESCE(NULLIF(data->'former_codes', 'null'::jsonb), '[]'::jsonb)
-	           || COALESCE(NULLIF(data->'former_names', 'null'::jsonb), '[]'::jsonb)
-	         ) value
-	         WHERE position(lower($3 COLLATE "pg_c_utf8") in lower(value COLLATE "pg_c_utf8")) > 0
-	       )
-	     ELSE
-	       position(lower($3 COLLATE "pg_c_utf8") in lower((data->>'title') COLLATE "pg_c_utf8")) > 0
-	   END)
-	   AND ($4 = '' OR data->'target'->>'kind' = $4)
-	 ORDER BY source COLLATE "C", id COLLATE "C"
-	 LIMIT $5`, afterSource, afterID, f.Query, f.Kind, f.Limit)
+	var rows *sql.Rows
+	if normQ == "" && f.Sort == "recent" {
+		rows, e = r.DB.QueryContext(ctx, `SELECT data || jsonb_build_object('at',at_utc) FROM search.documents
+ WHERE (data->>'visible')::boolean AND at_utc IS NOT NULL
+ AND (NOT $1 OR at_utc < $2 OR (at_utc=$2 AND (source COLLATE "C",id COLLATE "C")>($3 COLLATE "C",$4 COLLATE "C")))
+ AND ($5='' OR data->'target'->>'kind'=$5) AND ($6='' OR data->>'school_id'=$6)
+ AND ($7='' OR data->>'course_id'=$7) AND ($8='' OR jsonb_exists(COALESCE(NULLIF(data->'teacher_ids','null'::jsonb),'[]'::jsonb),$8))
+ ORDER BY at_utc DESC,source COLLATE "C",id COLLATE "C" LIMIT $9`, hasCursor, afterAt, afterSource, afterID, f.Kind, f.SchoolID, f.CourseID, f.TeacherID, f.Limit)
+	} else if normQ == "" {
+		rows, e = r.DB.QueryContext(ctx, `SELECT data FROM search.documents
+ WHERE (data->>'visible')::boolean AND (source COLLATE "C",id COLLATE "C") > ($1 COLLATE "C",$2 COLLATE "C")
+ AND ($3='' OR data->'target'->>'kind'=$3) AND ($4='' OR data->>'school_id'=$4)
+ AND ($5='' OR data->>'course_id'=$5) AND ($6='' OR jsonb_exists(COALESCE(NULLIF(data->'teacher_ids','null'::jsonb),'[]'::jsonb),$6))
+ ORDER BY source COLLATE "C",id COLLATE "C" LIMIT $7`, afterSource, afterID, f.Kind, f.SchoolID, f.CourseID, f.TeacherID, f.Limit)
+	} else {
+		const matching = `WITH base AS (
+  SELECT
+    source,
+    id,
+    data, at_utc,
+    data->'target'->>'kind' AS kind,
+    normalize(COALESCE(data->>'code', ''), NFKC) AS norm_code,
+    lower(normalize(COALESCE(data->>'title', ''), NFKC) COLLATE "pg_c_utf8") AS l_title,
+    lower(normalize(COALESCE(data->>'code', ''), NFKC) COLLATE "pg_c_utf8") AS l_code,
+    lower(normalize(COALESCE(data->>'english_name', ''), NFKC) COLLATE "pg_c_utf8") AS l_eng,
+    lower($1 COLLATE "pg_c_utf8") AS l_q
+  FROM search.documents
+  WHERE (data->>'visible')::boolean
+    AND ($3 = '' OR data->'target'->>'kind' = $3)
+    AND ($4='' OR data->>'school_id'=$4)
+    AND ($5='' OR data->>'course_id'=$5)
+    AND ($6='' OR jsonb_exists(COALESCE(NULLIF(data->'teacher_ids','null'::jsonb),'[]'::jsonb),$6))
+),
+matched AS (
+  SELECT
+    source,
+    id,
+    data, at_utc,
+    CASE
+      WHEN $1 = '' THEN 0
+      WHEN (kind = 'school' AND $1 ~ '^[0-9]+$' AND (
+        id = $1 OR norm_code = $1
+        OR (length($1) = 5 AND ((id ~ '^[0-9]{10}$' AND right(id, 5) = $1) OR (norm_code ~ '^[0-9]{10}$' AND right(norm_code, 5) = $1)))
+      ))
+      OR l_title = l_q
+      OR (kind IN ('school', 'course') AND l_code <> '' AND l_code = l_q)
+      OR (kind = 'course' AND (
+        (l_eng <> '' AND l_eng = l_q)
+        OR EXISTS (
+          SELECT 1 FROM jsonb_array_elements_text(COALESCE(NULLIF(data->'former_codes', 'null'::jsonb), '[]'::jsonb)) fc
+          WHERE lower(normalize(fc, NFKC) COLLATE "pg_c_utf8") = l_q
+        )
+      )) THEN 0
+      WHEN position(l_q in l_title) = 1
+        OR (kind IN ('school', 'course') AND l_code <> '' AND position(l_q in l_code) = 1)
+        OR (kind = 'course' AND l_eng <> '' AND position(l_q in l_eng) = 1) THEN 1
+      WHEN NOT EXISTS (
+        SELECT 1 FROM unnest($2::text[]) AS t
+        WHERE position(lower(t COLLATE "pg_c_utf8") in l_title) = 0
+      )
+      OR (kind = 'course' AND l_eng <> '' AND NOT EXISTS (
+        SELECT 1 FROM unnest($2::text[]) AS t
+        WHERE position(lower(t COLLATE "pg_c_utf8") in l_eng) = 0
+      )) THEN 2
+      ELSE 3
+    END AS bucket,
+    CASE
+      WHEN $1 = '' THEN 0
+      WHEN kind = 'school' THEN 1
+      WHEN kind = 'course' THEN 2
+      WHEN kind = 'teacher' THEN 3
+      WHEN kind = 'resource' THEN 4
+      WHEN kind = 'review' THEN 5
+      ELSE 6
+    END AS kind_rank
+  FROM base
+  WHERE $1 = '' OR NOT EXISTS (
+    SELECT 1 FROM unnest($2::text[]) AS t
+    WHERE NOT (
+      CASE
+        WHEN kind = 'school' AND t ~ '^[0-9]+$' THEN
+          id = t OR norm_code = t
+          OR (length(t) = 5 AND ((id ~ '^[0-9]{10}$' AND right(id, 5) = t) OR (norm_code ~ '^[0-9]{10}$' AND right(norm_code, 5) = t)))
+          OR position(t in l_title) > 0
+          OR EXISTS (
+            SELECT 1 FROM jsonb_array_elements_text(COALESCE(NULLIF(data->'aliases', 'null'::jsonb), '[]'::jsonb)) alias
+            WHERE position(t in lower(normalize(alias, NFKC) COLLATE "pg_c_utf8")) > 0
+          )
+        ELSE
+          position(lower(t COLLATE "pg_c_utf8") in l_title) > 0
+          OR (kind = 'course' AND position(lower(t COLLATE "pg_c_utf8") in l_code) > 0)
+          OR (kind = 'school' AND (l_code = lower(t COLLATE "pg_c_utf8") OR id = t))
+          OR (kind IN ('school', 'course', 'teacher') AND EXISTS (
+            SELECT 1 FROM jsonb_array_elements_text(COALESCE(NULLIF(data->'aliases', 'null'::jsonb), '[]'::jsonb)) alias
+            WHERE position(lower(t COLLATE "pg_c_utf8") in lower(normalize(alias, NFKC) COLLATE "pg_c_utf8")) > 0
+          ))
+          OR (kind = 'course' AND (
+            position(lower(t COLLATE "pg_c_utf8") in l_eng) > 0
+            OR EXISTS (
+              SELECT 1 FROM jsonb_array_elements_text(COALESCE(NULLIF(data->'former_codes', 'null'::jsonb), '[]'::jsonb) || COALESCE(NULLIF(data->'former_names', 'null'::jsonb), '[]'::jsonb)) val
+              WHERE position(lower(t COLLATE "pg_c_utf8") in lower(normalize(val, NFKC) COLLATE "pg_c_utf8")) > 0
+            )
+          ))
+      END
+    )
+  )
+)
+`
+		args := []any{normQ, terms, f.Kind, f.SchoolID, f.CourseID, f.TeacherID, hasCursor}
+		if f.Sort == "recent" {
+			rows, e = r.DB.QueryContext(ctx, matching+`SELECT data || jsonb_build_object('at',at_utc) FROM matched WHERE at_utc IS NOT NULL AND (NOT $7 OR at_utc < $8 OR (at_utc=$8 AND (source COLLATE "C",id COLLATE "C")>($9 COLLATE "C",$10 COLLATE "C"))) ORDER BY at_utc DESC,source COLLATE "C",id COLLATE "C" LIMIT $11`, append(args, afterAt, afterSource, afterID, f.Limit)...)
+		} else {
+			rows, e = r.DB.QueryContext(ctx, matching+`SELECT data FROM matched
+WHERE (NOT $7 OR (bucket, kind_rank, source COLLATE "C", id COLLATE "C") > ($8, $9, $10 COLLATE "C", $11 COLLATE "C"))
+ORDER BY bucket ASC, kind_rank ASC, source COLLATE "C" ASC, id COLLATE "C" ASC
+LIMIT $12`, append(args, afterBucket, afterKindRank, afterSource, afterID, f.Limit)...)
+		}
+	}
 	if e != nil {
 		return nil, safe(e)
 	}
@@ -269,10 +371,10 @@ func putDocumentBatch(ctx context.Context, tx *sql.Tx, docs []s.Document) error 
 	if stale {
 		return s.ErrConflict
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO search.documents(source,id,revision,data)
-		SELECT src, id, rev, payload::jsonb
+	_, err := tx.ExecContext(ctx, `INSERT INTO search.documents(source,id,revision,data,at_utc)
+		SELECT src, id, rev, payload::jsonb, (payload::jsonb->>'at')::timestamptz
 		FROM UNNEST($1::text[], $2::text[], $3::bigint[], $4::text[]) AS inc(src, id, rev, payload)
-		ON CONFLICT (source,id) DO UPDATE SET revision=EXCLUDED.revision, data=EXCLUDED.data
+		ON CONFLICT (source,id) DO UPDATE SET revision=EXCLUDED.revision, data=EXCLUDED.data, at_utc=EXCLUDED.at_utc
 		WHERE search.documents.revision <= EXCLUDED.revision`, sources, ids, revisions, payloads)
 	return err
 }
@@ -332,6 +434,10 @@ func (r *Repository) Rebuild(ctx context.Context, load func(func([]s.Document) e
 }
 
 func (r *Repository) RebuildWindow(ctx context.Context, from, to time.Time, load func(func([]s.Document) error, func([]s.ActivitySnapshot) error) error) error {
+	return r.RebuildWindowAt(ctx, time.Time{}, from, to, load)
+}
+
+func (r *Repository) RebuildWindowAt(ctx context.Context, rebuiltAt, from, to time.Time, load func(func([]s.Document) error, func([]s.ActivitySnapshot) error) error) error {
 	tx, e := r.DB.BeginTx(ctx, nil)
 	if e != nil {
 		return safe(e)
@@ -360,10 +466,74 @@ func (r *Repository) RebuildWindow(ctx context.Context, from, to time.Time, load
 	if e != nil {
 		return safe(e)
 	}
-	if _, e = tx.ExecContext(ctx, "UPDATE search.state SET ready=true WHERE id"); e != nil {
+	if rebuiltAt.IsZero() {
+		_, e = tx.ExecContext(ctx, "UPDATE search.state SET ready=true, rebuilt_at=now() WHERE id")
+	} else {
+		_, e = tx.ExecContext(ctx, "UPDATE search.state SET ready=true, rebuilt_at=$1, activity_from=$2, activity_to=$3 WHERE id", rebuiltAt.UTC(), from.UTC().Format(time.DateOnly), to.UTC().Format(time.DateOnly))
+	}
+	if e != nil {
 		return safe(e)
 	}
 	return safe(tx.Commit())
+}
+
+func (r *Repository) Status(ctx context.Context) (s.Status, error) {
+	out := s.Status{
+		Documents:  map[string]s.SourceCounts{},
+		Activities: map[string]s.SourceCounts{},
+	}
+	var rebuiltAt sql.NullTime
+	var actFrom, actTo sql.NullString
+	e := r.DB.QueryRowContext(ctx, `SELECT ready, rebuilt_at, activity_from::text, activity_to::text FROM search.state WHERE id`).Scan(&out.Ready, &rebuiltAt, &actFrom, &actTo)
+	if e != nil {
+		return s.Status{}, safe(e)
+	}
+	if rebuiltAt.Valid {
+		t := rebuiltAt.Time.UTC()
+		out.RebuiltAt = &t
+	}
+	if actFrom.Valid {
+		out.ActivityWindowFrom = actFrom.String
+	}
+	if actTo.Valid {
+		out.ActivityWindowTo = actTo.String
+	}
+	docRows, e := r.DB.QueryContext(ctx, `SELECT source, count(*), count(*) FILTER (WHERE (data->>'visible')::boolean) FROM search.documents GROUP BY source`)
+	if e != nil {
+		return s.Status{}, safe(e)
+	}
+	defer docRows.Close()
+	for docRows.Next() {
+		var src string
+		var c s.SourceCounts
+		if e = docRows.Scan(&src, &c.Total, &c.Visible); e != nil {
+			return s.Status{}, safe(e)
+		}
+		out.Documents[src] = c
+	}
+	if e = docRows.Err(); e != nil {
+		return s.Status{}, safe(e)
+	}
+	actRows, e := r.DB.QueryContext(ctx, `SELECT source, count(*), count(*) FILTER (WHERE (data->>'visible')::boolean) FROM search.activities GROUP BY source`)
+	if e != nil {
+		return s.Status{}, safe(e)
+	}
+	defer actRows.Close()
+	for actRows.Next() {
+		var src string
+		var c s.SourceCounts
+		if e = actRows.Scan(&src, &c.Total, &c.Visible); e != nil {
+			return s.Status{}, safe(e)
+		}
+		out.Activities[src] = c
+	}
+	if e = actRows.Err(); e != nil {
+		return s.Status{}, safe(e)
+	}
+	if e = r.DB.QueryRowContext(ctx, `SELECT count(*) FROM search.inbox`).Scan(&out.InboxCount); e != nil {
+		return s.Status{}, safe(e)
+	}
+	return out, nil
 }
 func (r *Repository) CheckRuntime(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -388,6 +558,7 @@ func (r *Repository) CheckRuntime(ctx context.Context) error {
 		{"search.documents", []string{"SELECT", "INSERT", "UPDATE"}},
 		{"search.activities", []string{"SELECT", "INSERT", "UPDATE"}},
 		{"search.state", []string{"SELECT", "UPDATE"}},
+		{"search.rankings", []string{"SELECT", "INSERT", "UPDATE"}},
 		{"search.inbox", []string{"SELECT", "INSERT"}},
 	} {
 		for _, priv := range req.privs {
@@ -403,6 +574,7 @@ func (r *Repository) CheckRuntime(ctx context.Context) error {
 		OR has_table_privilege(current_user, 'search.documents', 'TRUNCATE')
 		OR has_table_privilege(current_user, 'search.activities', 'TRUNCATE')
 		OR has_table_privilege(current_user, 'search.state', 'TRUNCATE')
+ OR has_table_privilege(current_user, 'search.rankings', 'TRUNCATE')
 		OR EXISTS (
 			SELECT 1 FROM pg_namespace
 			WHERE nspname NOT LIKE 'pg_%' AND nspname <> 'information_schema'

@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func TestSDKEndToEndContractAndPopularDynamicPagination(t *testing.T) {
+func TestSDKEndToEndContractAndPopularSnapshotPagination(t *testing.T) {
 	svc, _, f, _ := setup(t)
 	ctx := context.Background()
 
@@ -62,7 +62,7 @@ func TestSDKEndToEndContractAndPopularDynamicPagination(t *testing.T) {
 		t.Fatalf("unexpected SDK my-votes response: err=%v status=%d", err, votesRes.StatusCode())
 	}
 
-	// 3. Popular dynamic pagination: fetch page 1 (limit=1 -> course-1 with score 30), then mutate course-1's score to 35 before fetching page 2!
+	// 3. Popular dynamic pagination: fetch page 1 (limit=1 -> course-1 with score 30), then mutate course-1's score to 5 before fetching page 2!
 	limit := 1
 	popPage1, err := client.PopularWithResponse(ctx, &sdk.PopularParams{
 		Kind:  sdk.PopularParamsKindCourse,
@@ -72,9 +72,9 @@ func TestSDKEndToEndContractAndPopularDynamicPagination(t *testing.T) {
 		t.Fatalf("unexpected popular page 1: err=%v %+v", err, popPage1.JSON200)
 	}
 
-	// Simulate new views arriving on course-1 between page 1 and page 2 so its score changes from 30 to 35.
+	// Simulate new views arriving on course-1 between page 1 and page 2 so its score changes from 30 to 5.
 	mu.Lock()
-	updatedAct := activity("catalog", "course", "course-1", "2026-11-09", map[string]int64{"views": 35})
+	updatedAct := activity("catalog", "course", "course-1", "2026-11-09", map[string]int64{"views": 5})
 	updatedAct.Revision = 2
 	addActivity(t, svc, f, updatedAct)
 	mu.Unlock()
@@ -86,7 +86,7 @@ func TestSDKEndToEndContractAndPopularDynamicPagination(t *testing.T) {
 		Limit:  &limit,
 	})
 	if err != nil || popPage2.StatusCode() != http.StatusOK || popPage2.JSON200 == nil || len(popPage2.JSON200.Items) != 1 || popPage2.JSON200.Items[0].Target.Id != "course-2" {
-		t.Fatalf("dynamic popular page 2 failed: err=%v status=%d body=%s", err, popPage2.StatusCode(), string(popPage2.Body))
+		t.Fatalf("snapshot popular page 2 failed: err=%v status=%d body=%s", err, popPage2.StatusCode(), string(popPage2.Body))
 	}
 
 	cursor2 := popPage2.JSON200.NextCursor
@@ -96,7 +96,7 @@ func TestSDKEndToEndContractAndPopularDynamicPagination(t *testing.T) {
 		Limit:  &limit,
 	})
 	if err != nil || popPage3.StatusCode() != http.StatusOK || popPage3.JSON200 == nil || len(popPage3.JSON200.Items) != 1 || popPage3.JSON200.Items[0].Target.Id != "course-3" {
-		t.Fatalf("dynamic popular page 3 failed: err=%v status=%d body=%s", err, popPage3.StatusCode(), string(popPage3.Body))
+		t.Fatalf("snapshot popular page 3 failed: err=%v status=%d body=%s", err, popPage3.StatusCode(), string(popPage3.Body))
 	}
 
 	// Malformed cursor still returns 400 invalid_input.
