@@ -88,7 +88,7 @@ func TestIdempotentMigrateLockFreeAndStrictRuntimePrivilegeChecks(t *testing.T) 
 	// 1. Minimal valid role (no INSERT on search.state, no DELETE anywhere) MUST pass.
 	if err := checkWithRole("minimal_valid", `
 		GRANT USAGE ON SCHEMA search TO %[1]s;
-		GRANT SELECT,INSERT,UPDATE ON search.documents,search.activities TO %[1]s;
+		GRANT SELECT,INSERT,UPDATE ON search.rankings,search.documents,search.activities TO %[1]s;
 		GRANT SELECT,UPDATE ON search.state TO %[1]s;
 		GRANT SELECT,INSERT ON search.inbox TO %[1]s;
 	`); err != nil {
@@ -96,7 +96,7 @@ func TestIdempotentMigrateLockFreeAndStrictRuntimePrivilegeChecks(t *testing.T) 
 	}
 
 	const minimum = `GRANT USAGE ON SCHEMA search TO %[1]s;
-		GRANT SELECT,INSERT,UPDATE ON search.documents,search.activities TO %[1]s;
+		GRANT SELECT,INSERT,UPDATE ON search.rankings,search.documents,search.activities TO %[1]s;
 		GRANT SELECT,UPDATE ON search.state TO %[1]s;
 		GRANT SELECT,INSERT ON search.inbox TO %[1]s;`
 	if err := checkWithRole("replication", minimum+"ALTER ROLE %[1]s REPLICATION"); !errors.Is(err, s.ErrUnavailable) {
@@ -141,7 +141,7 @@ func TestIdempotentMigrateLockFreeAndStrictRuntimePrivilegeChecks(t *testing.T) 
 	// 2. Backend-style valid role (DELETE on projections, REVOKE UPDATE,DELETE on inbox, no TRUNCATE) MUST pass.
 	if err := checkWithRole("backend_valid", `
 		GRANT USAGE ON SCHEMA search TO %[1]s;
-		GRANT SELECT,INSERT,UPDATE,DELETE ON search.documents,search.activities,search.state TO %[1]s;
+		GRANT SELECT,INSERT,UPDATE,DELETE ON search.rankings,search.documents,search.activities,search.state TO %[1]s;
 		GRANT SELECT,INSERT ON search.inbox TO %[1]s;
 	`); err != nil {
 		t.Fatalf("backend-compatible runtime role rejected: %v", err)
@@ -151,7 +151,7 @@ func TestIdempotentMigrateLockFreeAndStrictRuntimePrivilegeChecks(t *testing.T) 
 	for _, missingUpdateSQL := range []string{
 		`GRANT USAGE ON SCHEMA search TO %[1]s; GRANT SELECT,INSERT ON search.documents,search.inbox TO %[1]s; GRANT SELECT,INSERT,UPDATE ON search.activities,search.state TO %[1]s;`,
 		`GRANT USAGE ON SCHEMA search TO %[1]s; GRANT SELECT,INSERT,UPDATE ON search.documents,search.state TO %[1]s; GRANT SELECT,INSERT ON search.activities,search.inbox TO %[1]s;`,
-		`GRANT USAGE ON SCHEMA search TO %[1]s; GRANT SELECT,INSERT,UPDATE ON search.documents,search.activities TO %[1]s; GRANT SELECT,INSERT ON search.state,search.inbox TO %[1]s;`,
+		`GRANT USAGE ON SCHEMA search TO %[1]s; GRANT SELECT,INSERT,UPDATE ON search.rankings,search.documents,search.activities TO %[1]s; GRANT SELECT,INSERT ON search.state,search.inbox TO %[1]s;`,
 	} {
 		if err := checkWithRole("no_update", missingUpdateSQL); !errors.Is(err, s.ErrUnavailable) {
 			t.Fatalf("role missing UPDATE was accepted: %v", err)
@@ -160,7 +160,7 @@ func TestIdempotentMigrateLockFreeAndStrictRuntimePrivilegeChecks(t *testing.T) 
 
 	// 4. TRUNCATE on inbox or documents MUST be rejected.
 	for _, truncateSQL := range []string{
-		`GRANT USAGE ON SCHEMA search TO %[1]s; GRANT SELECT,INSERT,UPDATE ON search.documents,search.activities,search.state TO %[1]s; GRANT SELECT,INSERT,TRUNCATE ON search.inbox TO %[1]s;`,
+		`GRANT USAGE ON SCHEMA search TO %[1]s; GRANT SELECT,INSERT,UPDATE ON search.rankings,search.documents,search.activities,search.state TO %[1]s; GRANT SELECT,INSERT,TRUNCATE ON search.inbox TO %[1]s;`,
 		`GRANT USAGE ON SCHEMA search TO %[1]s; GRANT SELECT,INSERT,UPDATE,TRUNCATE ON search.documents TO %[1]s; GRANT SELECT,INSERT,UPDATE ON search.activities,search.state TO %[1]s; GRANT SELECT,INSERT ON search.inbox TO %[1]s;`,
 	} {
 		if err := checkWithRole("with_truncate", truncateSQL); !errors.Is(err, s.ErrUnavailable) {
@@ -170,8 +170,8 @@ func TestIdempotentMigrateLockFreeAndStrictRuntimePrivilegeChecks(t *testing.T) 
 
 	// 5. Cross-module schema USAGE or table SELECT MUST be rejected.
 	for _, crossModuleSQL := range []string{
-		`GRANT USAGE ON SCHEMA search,catalog_private TO %[1]s; GRANT SELECT,INSERT,UPDATE ON search.documents,search.activities,search.state TO %[1]s; GRANT SELECT,INSERT ON search.inbox TO %[1]s;`,
-		`GRANT USAGE ON SCHEMA search,catalog_private TO %[1]s; GRANT SELECT ON catalog_private.courses TO %[1]s; GRANT SELECT,INSERT,UPDATE ON search.documents,search.activities,search.state TO %[1]s; GRANT SELECT,INSERT ON search.inbox TO %[1]s;`,
+		`GRANT USAGE ON SCHEMA search,catalog_private TO %[1]s; GRANT SELECT,INSERT,UPDATE ON search.rankings,search.documents,search.activities,search.state TO %[1]s; GRANT SELECT,INSERT ON search.inbox TO %[1]s;`,
+		`GRANT USAGE ON SCHEMA search,catalog_private TO %[1]s; GRANT SELECT ON catalog_private.courses TO %[1]s; GRANT SELECT,INSERT,UPDATE ON search.rankings,search.documents,search.activities,search.state TO %[1]s; GRANT SELECT,INSERT ON search.inbox TO %[1]s;`,
 	} {
 		if err := checkWithRole("cross_schema", crossModuleSQL); !errors.Is(err, s.ErrUnavailable) {
 			t.Fatalf("role with cross-module schema/table access was accepted: %v", err)

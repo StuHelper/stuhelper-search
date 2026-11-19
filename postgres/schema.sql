@@ -128,3 +128,11 @@ BEGIN
   END IF;
  END LOOP;
 END $$;
+
+CREATE TABLE IF NOT EXISTS search.rankings (
+ slot smallint PRIMARY KEY CHECK(slot BETWEEN 1 AND 1024),
+ token text NOT NULL UNIQUE,
+ targets jsonb NOT NULL CHECK(jsonb_typeof(targets)='array' AND jsonb_array_length(targets)<=10000),
+ expires_at timestamptz NOT NULL
+);
+REVOKE ALL ON search.rankings FROM PUBLIC;

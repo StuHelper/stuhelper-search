@@ -33,7 +33,7 @@ export interface paths {
         };
         /**
          * 配置窗口内活动加权排行，同分按来源和 ID 排序
-         * @description 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。
+         * @description 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。 同次翻页固定首屏排名，每页按当前权限返回内容。最后一次翻页满 24 小时后返回 410 snapshot_expired，需主动刷新。
          */
         get: operations["popular"];
         put?: never;
@@ -145,7 +145,7 @@ export interface components {
              * @description 稳定错误码，包含参数非法、未登录、路径或方法不支持、索引构建中、依赖不可用、超时及请求取消。
              * @enum {string}
              */
-            code: "invalid_input" | "unauthenticated" | "not_found" | "method_not_allowed" | "unavailable" | "timeout" | "cancelled" | "index_building";
+            code: "invalid_input" | "unauthenticated" | "not_found" | "method_not_allowed" | "unavailable" | "timeout" | "cancelled" | "index_building" | "snapshot_expired";
         };
     };
     responses: never;
@@ -319,6 +319,15 @@ export interface operations {
                 headers: {
                     /** @description 允许的 HTTP 方法列表（GET）。 */
                     Allow?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 排名快照已过期，刷新以读取最新热榜（snapshot_expired）。 */
+            410: {
+                headers: {
                     [name: string]: unknown;
                 };
                 content: {

@@ -23,6 +23,7 @@ const (
 	InvalidInput     ErrorCode = "invalid_input"
 	MethodNotAllowed ErrorCode = "method_not_allowed"
 	NotFound         ErrorCode = "not_found"
+	SnapshotExpired  ErrorCode = "snapshot_expired"
 	Timeout          ErrorCode = "timeout"
 	Unauthenticated  ErrorCode = "unauthenticated"
 	Unavailable      ErrorCode = "unavailable"
@@ -40,6 +41,8 @@ func (e ErrorCode) Valid() bool {
 	case MethodNotAllowed:
 		return true
 	case NotFound:
+		return true
+	case SnapshotExpired:
 		return true
 	case Timeout:
 		return true
@@ -436,7 +439,7 @@ type ClientInterface interface {
 
 	// Popular 配置窗口内活动加权排行，同分按来源和 ID 排序
 	//
-	// 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。.
+	// 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。 同次翻页固定首屏排名，每页按当前权限返回内容。最后一次翻页满 24 小时后返回 410 snapshot_expired，需主动刷新。.
 	//
 	// Corresponds with GET /api/v1/search/popular (the `Popular` operationId).
 	Popular(ctx context.Context, params *PopularParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -478,7 +481,7 @@ func (c *Client) MyVotes(ctx context.Context, params *MyVotesParams, reqEditors 
 
 // Popular 配置窗口内活动加权排行，同分按来源和 ID 排序
 //
-// 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。.
+// 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。 同次翻页固定首屏排名，每页按当前权限返回内容。最后一次翻页满 24 小时后返回 410 snapshot_expired，需主动刷新。.
 //
 // Corresponds with GET /api/v1/search/popular (the `Popular` operationId).
 func (c *Client) Popular(ctx context.Context, params *PopularParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -847,7 +850,7 @@ type ClientWithResponsesInterface interface {
 
 	// PopularWithResponse 配置窗口内活动加权排行，同分按来源和 ID 排序
 	//
-	// 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。.
+	// 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。 同次翻页固定首屏排名，每页按当前权限返回内容。最后一次翻页满 24 小时后返回 410 snapshot_expired，需主动刷新。.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -1086,6 +1089,8 @@ type PopularResponse struct {
 	JSON404 *Error
 	// JSON405 the response for an HTTP 405 `application/json` response
 	JSON405 *Error
+	// JSON410 the response for an HTTP 410 `application/json` response
+	JSON410 *Error
 	// JSON499 the response for an HTTP 499 `application/json` response
 	JSON499 *Error
 	// JSON503 the response for an HTTP 503 `application/json` response
@@ -1121,6 +1126,11 @@ func (r PopularResponse) GetJSON404() *Error {
 // GetJSON405 returns the response for an HTTP 405 `application/json` response
 func (r PopularResponse) GetJSON405() *Error {
 	return r.JSON405
+}
+
+// GetJSON410 returns the response for an HTTP 410 `application/json` response
+func (r PopularResponse) GetJSON410() *Error {
+	return r.JSON410
 }
 
 // GetJSON499 returns the response for an HTTP 499 `application/json` response
@@ -1199,7 +1209,7 @@ func (c *ClientWithResponses) MyVotesWithResponse(ctx context.Context, params *M
 
 // PopularWithResponse 配置窗口内活动加权排行，同分按来源和 ID 排序
 //
-// 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。.
+// 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。 同次翻页固定首屏排名，每页按当前权限返回内容。最后一次翻页满 24 小时后返回 410 snapshot_expired，需主动刷新。.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -1456,6 +1466,13 @@ func ParsePopularResponse(rsp *http.Response) (*PopularResponse, error) {
 			return nil, err
 		}
 		response.JSON405 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 410:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON410 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 499:
 		var dest Error

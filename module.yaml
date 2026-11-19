@@ -28,6 +28,7 @@ scenario_tests:
   DS-01:
     - validation_inbox_test.go#TestUnicodeTargetRoundTripsThroughSearchAndActivity
     - integration_test.go#TestVisibilityPaginationAndHotTargets
+    - popular_scale_test.go#TestPopularKeysetCursorSurvivesScoreChangeAndRemoval
     - httpapi_contract_test.go#TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed
     - index_collation_cursor_test.go#TestIndexOrderUnicodeCollationOpaqueCursorAndSchoolQueryRules
     - error_window_test.go#TestErrorCodeEnumRetryAfterAndPopularWindowDays
@@ -38,8 +39,11 @@ scenario_tests:
     - httpapi_contract_test.go#TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed
     - filter_summary_test.go#TestMyVotesSummaryFieldsAndBoundedPageFill
   DS-05:
+    - popular_scale_test.go#TestPopularFixedSnapshotRenewalExpiryAndRevocation
     - activity_test.go#TestHeatWeightsWindowAndTeachers
     - activity_test.go#TestActivityOwnership
+    - popular_scale_test.go#TestPopularKeysetCursorSurvivesScoreChangeAndRemoval
+    - popular_scale_test.go#TestPopularCampusScaleDisabledSourceAndLazyCurrent
     - activity_test.go#TestPopularCountsNewerLiveActivityRevisionWithoutDroppingHotTargets
     - resource_popular_recent_test.go#TestPopularResourcesAndRecentDiscovery
   DS-06:

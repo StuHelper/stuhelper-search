@@ -8,6 +8,7 @@ import (
 )
 
 var (
+	ErrSnapshotExpired = errors.New("snapshot_expired")
 	ErrInput           = errors.New("invalid_input")
 	ErrUnauthenticated = errors.New("unauthenticated")
 	ErrNotFound        = errors.New("not_found")
@@ -99,6 +100,8 @@ type Filter struct {
 	Limit                                                   int
 }
 type Repository interface {
+	SaveRanking(context.Context, []Target, time.Time, time.Duration) (string, error)
+	ResumeRanking(context.Context, string, time.Time, time.Duration) ([]Target, error)
 	Apply(context.Context, Event, string) error
 	Candidates(context.Context, Filter) ([]Document, error)
 	// Rebuild holds the projection write lock and atomically publishes all source snapshots.
@@ -117,6 +120,18 @@ type Sources interface {
 	ActivitySnapshot(context.Context, string, time.Time, time.Time, string, int) ([]ActivitySnapshot, string, error)
 	CurrentActivity(context.Context, string, string, string) (ActivitySnapshot, bool, error)
 	MyVotes(context.Context, string, string, int) (Votes, error)
+}
+
+// BatchCurrentSource is an optional Sources extension for checking up to 100 targets from one source per call.
+// Unreadable, deleted, or missing targets are omitted or returned with Visible=false.
+type BatchCurrentSource interface {
+	CurrentBatch(ctx context.Context, user, source string, targets []Target) ([]Document, error)
+}
+
+// BatchActivitySource is an optional Sources extension for checking up to 100 daily activity IDs from one source per call.
+// Unreadable or missing snapshots are omitted or returned with Visible=false; disabled sources return ErrSourceDisabled.
+type BatchActivitySource interface {
+	CurrentActivities(ctx context.Context, user, source string, ids []string) ([]ActivitySnapshot, error)
 }
 type Config struct {
 	QueryTimeout       time.Duration

@@ -40,7 +40,7 @@ func (r *Repository) ApplyActivity(ctx context.Context, event s.ActivityEvent, d
 }
 func (r *Repository) Activities(ctx context.Context, f s.ActivityFilter) ([]s.ActivitySnapshot, error) {
 	afterSource, afterID, ok := splitAfter(f.After)
-	if !ok || f.Limit < 1 || f.Limit > 100 || !validDBString(f.Kind) || !validDBString(f.After) {
+	if !ok || f.Limit < 1 || f.Limit > 500 || !validDBString(f.Kind) || !validDBString(f.After) {
 		return nil, s.ErrInput
 	}
 	var ready bool
@@ -52,8 +52,12 @@ func (r *Repository) Activities(ctx context.Context, f s.ActivityFilter) ([]s.Ac
 	}
 	var rows *sql.Rows
 	var e error
+	excluded := f.ExcludeSources
+	if excluded == nil {
+		excluded = []string{}
+	}
 	if f.AfterDay == "" {
-		rows, e = r.DB.QueryContext(ctx, `SELECT data FROM search.activities WHERE kind=$1 AND day>=$2 AND day<$3 AND (source COLLATE "C", id COLLATE "C") > ($4 COLLATE "C", $5 COLLATE "C") AND (data->>'visible')::boolean ORDER BY source COLLATE "C", id COLLATE "C" LIMIT $6`, f.Kind, f.From, f.To, afterSource, afterID, f.Limit)
+		rows, e = r.DB.QueryContext(ctx, `SELECT data FROM search.activities WHERE kind=$1 AND day>=$2 AND day<$3 AND (source COLLATE "C", id COLLATE "C") > ($4 COLLATE "C", $5 COLLATE "C") AND (data->>'visible')::boolean AND NOT (source=ANY($7::text[])) ORDER BY source COLLATE "C", id COLLATE "C" LIMIT $6`, f.Kind, f.From, f.To, afterSource, afterID, f.Limit, excluded)
 	} else {
 		day, err := time.Parse(time.DateOnly, f.AfterDay)
 		if err != nil || day.Before(f.From.UTC()) || !day.Before(f.To.UTC()) {
@@ -62,7 +66,7 @@ func (r *Repository) Activities(ctx context.Context, f s.ActivityFilter) ([]s.Ac
 		rows, e = r.DB.QueryContext(ctx, `SELECT data FROM search.activities
  WHERE kind=$1 AND day >= $2 AND day < $3 AND (data->>'visible')::boolean
  AND (day,source COLLATE "C",id COLLATE "C") > ($4::date,$5 COLLATE "C",$6 COLLATE "C")
- ORDER BY day,source COLLATE "C",id COLLATE "C" LIMIT $7`, f.Kind, f.From, f.To, f.AfterDay, afterSource, afterID, f.Limit)
+ AND NOT (source=ANY($8::text[])) ORDER BY day,source COLLATE "C",id COLLATE "C" LIMIT $7`, f.Kind, f.From, f.To, f.AfterDay, afterSource, afterID, f.Limit, excluded)
 	}
 	if e != nil {
 		return nil, safe(e)

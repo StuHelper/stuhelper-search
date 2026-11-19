@@ -114,6 +114,9 @@ func fail(w http.ResponseWriter, r *http.Request, e error) {
 	code := http.StatusServiceUnavailable
 	name := "unavailable"
 	switch {
+	case errors.Is(e, s.ErrSnapshotExpired):
+		code = http.StatusGone
+		name = "snapshot_expired"
 	case errors.Is(e, s.ErrInput):
 		code = http.StatusBadRequest
 		name = "invalid_input"

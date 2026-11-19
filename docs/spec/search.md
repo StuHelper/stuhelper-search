@@ -16,7 +16,9 @@ search 通过来源公开事件构建可重建投影，索引只保存公开标�
 
 HTTP 请求要求登录。身份服务暂不可用或超时分别返回 503 或 504，客户端主动取消返回 499，不伪报为 401。非 GET 方法返回 405 与 Allow: GET。查询串严格校验编码与参数白名单，畸形或未知参数返回 400。Sources.Current 根据可信请求人复核当前权限及可见状态，修订不一致暂不展示，来源故障返回 503。
 
-搜索对查询词做 Unicode NFKC 全半角规范化，按空白拆分为最多 5 个词元做组合匹配。所有词元均须命中对象的公开检索字段；学校、课程与教师支持公开 `aliases`（如简称与拼音缩写）。
+首次读取按热度降序、来源和对象 ID 升序固定排名。单项权重上限为 1e9。样本量按有效计数之和计算。游标绑定请求人、学校和榜单类型，后续各页按首屏顺序读取，逐页检查当前可见性。响应使用 window_days 表示统计窗口。
+
+每次成功续页延长 24 小时有效期。过期时返回 410 snapshot_expired，界面提示主动刷新。刷新后重新计算排名。每个快照最多保存 10000 个目标，每个数据库最多保存 1024 个快照，新快照可复用过期位置。
 
 使用 `sort=recent` 时，候选按内容时间降序排列，同一时间按来源和 ID 的字节序排列。游标只能用于原排序模式。
 
@@ -36,7 +38,9 @@ HTTP 请求要求登录。身份服务暂不可用或超时分别返回 503 或 
 
 我的投票委托 reviews 的当前请求人公开接口，只返回有效选择并再次检查目标权限，附带公开评价标题、关联课程 ID 与学校 ID。遇到已撤回或无权限评价时，单次请求最多扫描 500 条上游投票自动补齐页长。修改及取消使用 reviews 自身接口。
 
-热门排行按对象汇总窗口内各来源的日快照，再用后台权重计算热度。权重顺序为浏览、评价、收藏、互动。最低样本量使用四项有效计数之和，与权重无关。按加权热度降序，同分按来源和对象 ID 排序，并在响应中返回 `window_days` 供客户端展示统计窗口说明。
+首次读取按热度降序、来源和对象 ID 升序固定排名。单项权重上限为 1e9。样本量按有效计数之和计算。游标绑定请求人、学校和榜单类型，后续各页按首屏顺序读取，逐页检查当前可见性。响应使用 window_days 表示统计窗口。
+
+每次成功续页延长 24 小时有效期。过期时返回 410 snapshot_expired，界面提示主动刷新。刷新后重新计算排名。每个快照最多保存 10000 个目标，每个数据库最多保存 1024 个快照，新快照可复用过期位置。
 
 窗口按 UTC 日查询，开始为 now−HeatWindow 所在日的零点（包含），结束为当前日之后的零点（不包含）。当前日使用已提交快照，窗口参数和当前时间在单次查询或重建开始时固定。
 
@@ -109,7 +113,11 @@ Sources 是 backend 的来源分发适配器，source 参数选择提供方。�
 DiscoverySnapshot(ctx context.Context, source, cursor string, limit int) ([]Document, string, error)
 ActivitySnapshot(ctx context.Context, source string, fromDay, toDay time.Time, cursor string, limit int) ([]ActivitySnapshot, string, error)
 CurrentActivity(ctx context.Context, principal, source, activityID string) (ActivitySnapshot, bool, error)
+CurrentBatch(ctx context.Context, user, source string, targets []Target) ([]Document, error)
+CurrentActivities(ctx context.Context, user, source string, ids []string) ([]ActivitySnapshot, error)
 ```
+
+CurrentBatch 与 CurrentActivities 为可选批量扩展接口，每批最多 100 条；未实现时回退到单条接口。单次热门查询首次遇到来源返回 ErrSourceDisabled 后，后续数据库分页直接跳过该来源且不计入扫描配额。
 
 catalog、reviews、favorites 各自实现以下提供方端口。source 由模块固定，不能接受调用方指定其他来源。分页后续请求沿用原窗口、快照版本和上限；来源查询通过公开 Repository/Service 接口提供。
 

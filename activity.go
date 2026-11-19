@@ -31,10 +31,11 @@ type ActivityEvent struct {
 }
 type ActivityFilter struct {
 	// AfterDay selects window-ordered traversal; omitted by callers using the source/ID order.
-	AfterDay    string
-	Kind, After string
-	From, To    time.Time
-	Limit       int
+	AfterDay       string
+	ExcludeSources []string
+	Kind, After    string
+	From, To       time.Time
+	Limit          int
 }
 
 // ActivityID is independent of provider; the database key includes Source.

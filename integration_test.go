@@ -196,7 +196,7 @@ func TestProjectionReplayRebuildAndIsolation(t *testing.T) {
 	if e = repo.CheckRuntime(ctx); e == nil {
 		t.Fatal("migration owner accepted")
 	}
-	_, e = db.Exec(`CREATE ROLE search_runtime NOLOGIN; GRANT USAGE ON SCHEMA search TO search_runtime; GRANT SELECT,INSERT,UPDATE ON search.documents,search.activities,search.state TO search_runtime; GRANT SELECT,INSERT ON search.inbox TO search_runtime; CREATE SCHEMA source_private; CREATE TABLE source_private.secret(id int)`)
+	_, e = db.Exec(`CREATE ROLE search_runtime NOLOGIN; GRANT USAGE ON SCHEMA search TO search_runtime; GRANT SELECT,INSERT,UPDATE ON search.rankings,search.documents,search.activities,search.state TO search_runtime; GRANT SELECT,INSERT ON search.inbox TO search_runtime; CREATE SCHEMA source_private; CREATE TABLE source_private.secret(id int)`)
 	if e != nil {
 		t.Fatal(e)
 	}

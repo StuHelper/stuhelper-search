@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"golang.org/x/text/unicode/norm"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -40,7 +39,7 @@ func New(repo Repository, sources Sources, c Config) (*Service, error) {
 	}
 	positive := false
 	for _, w := range c.HeatWeights {
-		if math.IsNaN(w) || math.IsInf(w, 0) || w < 0 {
+		if math.IsNaN(w) || math.IsInf(w, 0) || w < 0 || w > 1e9 {
 			return nil, ErrInput
 		}
 		positive = positive || w > 0
@@ -553,145 +552,6 @@ func (s *Service) MyVotes(ctx context.Context, user, cursor string, limit int) (
 func (s *Service) Popular(ctx context.Context, user, kind, cursor string, limit int) (Page, error) {
 	return s.PopularWithParams(ctx, user, PopularParams{Kind: kind, Cursor: cursor, Limit: limit})
 }
-func (s *Service) PopularWithParams(ctx context.Context, user string, p PopularParams) (Page, error) {
-	kind, limit, cursor := p.Kind, p.Limit, p.Cursor
-	start := time.Now()
-	windowDays := int(math.Ceil(s.config.HeatWindow.Hours() / 24))
-	if windowDays < 1 {
-		windowDays = 1
-	}
-	out := Page{Items: []Item{}, WindowDays: windowDays}
-	if e := auth(user); e != nil {
-		s.observe("popular", "", "unauthenticated", start, 0, 0)
-		return out, e
-	}
-	if !validFilterID(p.SchoolID) || limit < 1 || limit > 100 || (kind != "course" && kind != "teacher" && kind != "resource") {
-		s.observe("popular", "", "invalid_input", start, 0, 0)
-		return out, ErrInput
-	}
-	ctx, cancel := context.WithTimeout(ctx, s.config.QueryTimeout)
-	defer cancel()
-	scope := "popular:" + kind
-	after, e := s.openCursor(ctx, scope, user, cursor)
-	if e != nil {
-		s.observe("popular", "", "invalid_input", start, 0, 0)
-		return out, e
-	}
-	type ranked struct {
-		d       Document
-		score   float64
-		samples int64
-	}
-	scores := map[Target]*ranked{}
-	from, to := s.activityWindow()
-	f := ActivityFilter{Kind: kind, From: from, To: to, Limit: 100, AfterDay: from.UTC().Format(time.DateOnly)}
-	scanned := 0
-	skips := 0
-	for {
-		docs, e := s.repo.Activities(ctx, f)
-		if e != nil {
-			s.observe("popular", "", errorCode(e, "storage_unavailable"), start, scanned, skips)
-			return out, e
-		}
-		for _, d := range docs {
-			scanned++
-			if scanned > 10000 {
-				s.observe("popular", "", "scan_limit_exceeded", start, scanned, skips)
-				return out, ErrUnavailable
-			}
-			f.After = d.Source + "/" + d.ID
-			f.AfterDay = d.Day
-			live, ok, e := s.sources.CurrentActivity(ctx, user, d.Source, d.ID)
-			if errors.Is(e, ErrSourceDisabled) {
-				continue
-			}
-			if e != nil {
-				err := upstreamError(ctx)
-				s.observe("popular", d.Source, errorCode(err, "upstream_unavailable"), start, scanned, skips)
-				return out, err
-			}
-			if !ok {
-				continue
-			}
-			if ValidateActivity(live) != nil || live.Source != d.Source || live.ID != d.ID || live.Target != d.Target || live.Day != d.Day {
-				s.observe("popular", d.Source, "invalid_source_data", start, scanned, skips)
-				return out, ErrUnavailable
-			}
-			if !live.Visible {
-				continue
-			}
-			if live.Revision < d.Revision {
-				skips++
-				continue
-			}
-			v := scores[d.Target]
-			if v == nil {
-				v = &ranked{}
-				v.d.Target = d.Target
-				scores[d.Target] = v
-			}
-			for i, name := range []string{"views", "reviews", "favorites", "interactions"} {
-				n := live.Metrics[name]
-				v.score += float64(n) * s.config.HeatWeights[i]
-				v.samples += n
-			}
-		}
-		if len(docs) < 100 {
-			break
-		}
-	}
-
-	rows := []ranked{}
-	for t, v := range scores {
-		if v.samples < int64(s.config.MinimumHeatSamples) {
-			continue
-		}
-		d, ok, e := s.sources.Current(ctx, user, t)
-		if e != nil {
-			err := upstreamError(ctx)
-			s.observe("popular", t.Source, errorCode(err, "upstream_unavailable"), start, scanned, skips)
-			return out, err
-		}
-		if ok && (d.Target != t || Validate(d) != nil) {
-			s.observe("popular", t.Source, "invalid_source_data", start, scanned, skips)
-			return out, ErrUnavailable
-		}
-		if ok && d.Visible && (p.SchoolID == "" || d.SchoolID == p.SchoolID) {
-			v.d = d
-			rows = append(rows, *v)
-		}
-	}
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].score == rows[j].score {
-			return key(rows[i].d) < key(rows[j].d)
-		}
-		return rows[i].score > rows[j].score
-	})
-	passed := after == ""
-	for _, r := range rows {
-		token := fmt.Sprintf("%.17g:%s", r.score, key(r.d))
-		if !passed {
-			passed = token == after
-			continue
-		}
-		out.Items = append(out.Items, documentItem(r.d))
-		if len(out.Items) == limit {
-			next, err := s.sealCursor(ctx, scope, user, token)
-			if err != nil {
-				return Page{}, err
-			}
-			out.NextCursor = next
-			break
-		}
-	}
-	if !passed {
-		s.observe("popular", "", "invalid_input", start, scanned, skips)
-		return Page{}, ErrInput
-	}
-	s.observe("popular", "", "ok", start, scanned, skips)
-	return out, nil
-}
-
 func upstreamError(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err

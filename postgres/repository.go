@@ -536,6 +536,7 @@ func (r *Repository) CheckRuntime(ctx context.Context) error {
 		{"search.documents", []string{"SELECT", "INSERT", "UPDATE"}},
 		{"search.activities", []string{"SELECT", "INSERT", "UPDATE"}},
 		{"search.state", []string{"SELECT", "UPDATE"}},
+		{"search.rankings", []string{"SELECT", "INSERT", "UPDATE"}},
 		{"search.inbox", []string{"SELECT", "INSERT"}},
 	} {
 		for _, priv := range req.privs {
@@ -551,6 +552,7 @@ func (r *Repository) CheckRuntime(ctx context.Context) error {
 		OR has_table_privilege(current_user, 'search.documents', 'TRUNCATE')
 		OR has_table_privilege(current_user, 'search.activities', 'TRUNCATE')
 		OR has_table_privilege(current_user, 'search.state', 'TRUNCATE')
+ OR has_table_privilege(current_user, 'search.rankings', 'TRUNCATE')
 		OR EXISTS (
 			SELECT 1 FROM pg_namespace
 			WHERE nspname NOT LIKE 'pg_%' AND nspname <> 'information_schema'
