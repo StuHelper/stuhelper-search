@@ -26,6 +26,7 @@ scenario_tests:
     - course_search_test.go#TestCourseSearchFieldsValidateAtEventBoundary
     - relevance_search_test.go#TestMultiTermNFKCTeacherAliasesAndRelevanceRanking
   DS-01:
+    - sdk_contract_test.go#TestSDKEndToEndContractAndPopularSnapshotPagination
     - validation_inbox_test.go#TestUnicodeTargetRoundTripsThroughSearchAndActivity
     - integration_test.go#TestVisibilityPaginationAndHotTargets
     - popular_scale_test.go#TestPopularKeysetCursorSurvivesScoreChangeAndRemoval
@@ -35,6 +36,7 @@ scenario_tests:
     - filter_summary_test.go#TestSummaryFieldsAndMultiDimensionalFilters
     - resource_popular_recent_test.go#TestPopularResourcesAndRecentDiscovery
   DS-04:
+    - sdk_contract_test.go#TestSDKEndToEndContractAndPopularSnapshotPagination
     - integration_test.go#TestMyVotesHTTPAndTimeout
     - httpapi_contract_test.go#TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed
     - filter_summary_test.go#TestMyVotesSummaryFieldsAndBoundedPageFill
@@ -47,6 +49,7 @@ scenario_tests:
     - activity_test.go#TestPopularCountsNewerLiveActivityRevisionWithoutDroppingHotTargets
     - resource_popular_recent_test.go#TestPopularResourcesAndRecentDiscovery
   DS-06:
+    - sdk_contract_test.go#TestSharedAdvisoryLockAllowsConcurrentMultiSourceWrites
     - integration_test.go#TestProjectionFailureRollback
     - activity_test.go#TestActivityReplayAndRebuild
     - validation_inbox_test.go#TestUTF8NullValidationUnicodeLengthsAndInboxCanonicalDedup

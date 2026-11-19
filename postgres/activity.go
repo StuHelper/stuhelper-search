@@ -19,24 +19,9 @@ func putActivity(ctx context.Context, tx *sql.Tx, d s.ActivitySnapshot, equal bo
 	return e
 }
 func (r *Repository) ApplyActivity(ctx context.Context, event s.ActivityEvent, digest string) error {
-	tx, e := r.DB.BeginTx(ctx, nil)
-	if e != nil {
-		return safe(e)
-	}
-	defer tx.Rollback()
-	if e = lock(ctx, tx); e != nil {
-		return safe(e)
-	}
-	if seen, err := replayed(ctx, tx, event.Source, event.Type, event.ID, digest, event); seen || err != nil {
-		return err
-	}
-	if e = putActivity(ctx, tx, event.Data, false); e != nil {
-		return safe(e)
-	}
-	if _, e = tx.ExecContext(ctx, "INSERT INTO search.inbox(source,event_type,id,digest) VALUES($1,$2,$3,$4)", event.Source, event.Type, event.ID, digest); e != nil {
-		return safe(e)
-	}
-	return safe(tx.Commit())
+	return r.withInboxTx(ctx, event.Source, event.Type, event.ID, digest, event, func(tx *sql.Tx) error {
+		return putActivity(ctx, tx, event.Data, false)
+	})
 }
 func (r *Repository) Activities(ctx context.Context, f s.ActivityFilter) ([]s.ActivitySnapshot, error) {
 	afterSource, afterID, ok := splitAfter(f.After)

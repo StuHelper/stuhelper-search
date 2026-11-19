@@ -86,10 +86,47 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 	return tx.Commit()
 }
 
-// Every writer takes this lock. Rebuild is atomic and relay deliveries wait until publication.
+// Rebuild takes the exclusive advisory lock; daily event consumption uses the shared advisory lock.
 func lock(ctx context.Context, tx *sql.Tx) error {
 	_, e := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(726391840130)")
 	return e
+}
+func lockShared(ctx context.Context, tx *sql.Tx) error {
+	_, e := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock_shared(726391840130)")
+	return e
+}
+func (r *Repository) withInboxTx(ctx context.Context, src, eventType, id, digest string, original any, apply func(*sql.Tx) error) error {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return safe(err)
+	}
+	defer tx.Rollback()
+	if err = lockShared(ctx, tx); err != nil {
+		return safe(err)
+	}
+	if seen, err := replayed(ctx, tx, src, eventType, id, digest, original); seen || err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `INSERT INTO search.inbox(source,event_type,id,digest) VALUES($1,$2,$3,$4)
+ ON CONFLICT(source,event_type,id) DO NOTHING`, src, eventType, id, digest)
+	if err != nil {
+		return safe(err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return safe(err)
+	}
+	if n == 0 {
+		seen, err := replayed(ctx, tx, src, eventType, id, digest, original)
+		if err != nil || seen {
+			return err
+		}
+		return s.ErrUnavailable
+	}
+	if err = apply(tx); err != nil {
+		return safe(err)
+	}
+	return safe(tx.Commit())
 }
 func put(ctx context.Context, tx *sql.Tx, d s.Document, equal bool) error {
 	b, e := json.Marshal(d)
@@ -129,24 +166,9 @@ func replayed(ctx context.Context, tx *sql.Tx, source, eventType, id, digest str
 	return true, nil
 }
 func (r *Repository) Apply(ctx context.Context, event s.Event, digest string) error {
-	tx, e := r.DB.BeginTx(ctx, nil)
-	if e != nil {
-		return safe(e)
-	}
-	defer tx.Rollback()
-	if e = lock(ctx, tx); e != nil {
-		return safe(e)
-	}
-	if seen, err := replayed(ctx, tx, event.Source, event.Type, event.ID, digest, event); seen || err != nil {
-		return err
-	}
-	if e = put(ctx, tx, event.Data, false); e != nil {
-		return safe(e)
-	}
-	if _, e = tx.ExecContext(ctx, "INSERT INTO search.inbox(source,event_type,id,digest) VALUES($1,$2,$3,$4)", event.Source, event.Type, event.ID, digest); e != nil {
-		return safe(e)
-	}
-	return safe(tx.Commit())
+	return r.withInboxTx(ctx, event.Source, event.Type, event.ID, digest, event, func(tx *sql.Tx) error {
+		return put(ctx, tx, event.Data, false)
+	})
 }
 func (r *Repository) Candidates(ctx context.Context, f s.Filter) ([]s.Document, error) {
 	var ready bool
