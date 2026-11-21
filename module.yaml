@@ -20,6 +20,8 @@ optional:
 capabilities:
   - search.query
   - search.projection
+specifications:
+  - docs/spec/search.md
 scenario_tests:
   DS-COURSE-01:
     - course_search_test.go#TestCourseSearchIncludesCurrentFormerAndEnglishNames
@@ -64,7 +66,6 @@ scenario_tests:
     - validation_inbox_test.go#TestUTF8NullValidationUnicodeLengthsAndInboxCanonicalDedup
     - migration_runtime_test.go#TestIdempotentMigrateLockFreeAndStrictRuntimePrivilegeChecks
     - observability_maintenance_test.go#TestObserverStatusAndBoundedMaintenanceCleanup
-
   DS-SCHOOL-01:
     - school_search_test.go#TestSchoolSearchCodesNamesAliasesCurrentRightsAndRebuild
     - school_search_test.go#TestSchoolProjectionMigrationPreservesExistingDocuments

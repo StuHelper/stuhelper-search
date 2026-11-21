@@ -1,183 +1,90 @@
 ---
 type: spec
 status: Accepted
-updated: 2026-11-19
+updated: 2026-11-21
 ---
 
 # 搜索与热门发现模块
 
-## 当前行为
+## HTTP 接口
 
-OpenAPI 版本为 0.4.0，提供 `/api/v1/search`、`/api/v1/search/popular` 和 `/api/v1/search/my-votes` 三个 GET 接口。Go SDK 与 TypeScript 类型由接口定义生成。
+| 方法与路径 | 功能 |
+| --- | --- |
+| GET /api/v1/search | 检索学校、课程、教师、评价和学习资料 |
+| GET /api/v1/search/popular | 按活动热度列出课程、教师或学习资料，支持按学校过滤 |
+| GET /api/v1/search/my-votes | 查询当前请求人的有效评价投票 |
 
-错误响应 `Error.code` 使用固定枚举（`invalid_input`、`unauthenticated`、`not_found`、`snapshot_expired`、`index_building`、`unavailable`、`timeout`）；首次部署尚未完成重建时返回 `503 index_building`，所有 `503` 响应携带 `Retry-After` 头供客户端重试与多语言状态提示。
+[OpenAPI](../../contracts/search.openapi.json) 定义请求参数和错误码。三个接口要求登录，分页默认 20 条、最多 100 条。参数白名单按路由校验，编码错误、重复或未知参数返回 `400 invalid_input`。
 
-search 通过来源公开事件构建可重建投影，索引只保存公开标题、来源 ID、修订号、学校、归属关系、活动计数及可见状态。search 不读取其他模块业务表，不保存评价正文、作者身份或五维评分数据。
+模块 HTTP Handler 在搜索或热门的初始重建未完成时返回 `503 index_building`。来源故障返回 `503 unavailable`，模块 Handler 的 503 附带 `Retry-After`。请求超时和客户端取消分别返回 504、499。已知路由的非 GET 请求返回 405 和 `Allow: GET`。
 
-HTTP 请求要求登录。身份服务暂不可用或超时分别返回 503 或 504，客户端主动取消返回 499，不伪报为 401。非 GET 方法返回 405 与 Allow: GET。查询串严格校验编码与参数白名单，畸形或未知参数返回 400。Sources.Current 根据可信请求人复核当前权限及可见状态，修订不一致暂不展示，来源故障返回 503。
+## 内容检索
 
-首次读取按热度降序、来源和对象 ID 升序固定排名。单项权重上限为 1e9。样本量按有效计数之和计算。游标绑定请求人、学校和榜单类型，后续各页按首屏顺序读取，逐页检查当前可见性。响应使用 window_days 表示统计窗口。
+检索词最多 200 个 Unicode 码点。查询做 NFKC 规范化并按空白分为最多五项，超出的词并入第五项。每项都须匹配允许检索的字段，可分别命中不同字段。百分号、下划线和反斜线按字面处理，文本匹配忽略大小写。
 
-每次成功续页延长 24 小时有效期。过期时返回 410 snapshot_expired，界面提示主动刷新。刷新后重新计算排名。每个快照最多保存 10000 个目标，每个数据库最多保存 1024 个快照，新快照可复用过期位置。
+| 类型 | 检索字段 |
+| --- | --- |
+| 学校 | 规范 ID、学校代码、名称、登记别名。数字代码精确匹配，五位数字还匹配十位数字 ID 或代码的末五位。名称与别名使用子串匹配 |
+| 课程 | 当前课名、课程号、英文名、曾用课号、曾用名与登记别名 |
+| 教师 | 公开名称与登记别名 |
+| 评价、学习资料 | 公开标题 |
 
-使用 `sort=recent` 时，候选按内容时间降序排列，同一时间按来源和 ID 的字节序排列。游标只能用于原排序模式。
+课程的 `english_name`、`former_codes`、`former_names` 为独立字段。结果使用规范课程 ID，可返回这些字段与关联课程、教师和时间。课程合并后的旧对象由高修订墓碑隐藏。
 
-默认模式下，非空查询按相关性分桶排序（代码或标题完全一致、标题或代码前缀匹配、标题包含、别名或曾用字段包含），同桶内按类型优先级与 `(source, id)` 字节序稳定排序；空查询保持按 `(source, id)` 排序。
+默认相关性排序依次优先精确匹配、标题或受支持字段的前缀匹配、全部词命中标题或课程英文名、其他字段匹配。同级按学校、课程、教师、资料、评价排序，再按来源和 ID 的字节顺序排序。查询词为空时直接按来源和 ID 排序。
 
-每页默认 20 条，上限 100。游标记录已检查候选的分桶与位置，不暴露隐藏记录总量。一次最多检查 10000 条候选，搜索通过游标继续，热门排行超过上限返回暂不可用。
+`sort=recent` 只返回有内容时间的记录，按时间降序，时间相同按来源和 ID 的字节顺序排序。学校、课程、教师与内容类型条件可组合使用。
 
-每页默认 20 条，上限 100。加密游标与请求人和接口绑定，上限 2,048 字符。仅空游标表示结束；达到扫描或时间预算时可返回短页。非空查询改用相关性排序后，旧顺序的游标需要重新从首页查询。
+search 对投影候选逐项调用来源公开端口。只返回对当前请求人可见、当前修订与索引一致且仍符合筛选条件的对象。来源超时、故障或响应格式错误使整次查询失败。
 
-搜索支持按学校、课程和教师组合过滤。热门排行可按学校过滤。
+加密游标与请求人和排序模式绑定，最大长度为 2,048 字符，记录最近检查的候选。单次最多检查 10,000 个候选，达到扫描或时间预算可返回短页。空游标表示结束。切换检索条件或排序时从首页重新查询。
 
-搜索与热门结果的 `Item` 从已通过当前权限核验的对象返回公开 `code`、`course_id`、`teacher_ids` 与 `at` 摘要，不含评价正文或原始评分。
+## 热门排行
 
-查询超时由装配配置，必须大于零且不超过 30 秒，包含数据库和来源调用。来源适配器必须传递 context。重建总超时可配置（默认两分钟，上限 30 分钟），每批最多 100 条，每个来源最多 10000 批。
+支持课程、教师和资料三类榜单。活动窗口从当前时间减配置窗口后所在 UTC 日的零点起，到当前 UTC 日之后的零点止，左闭右开。响应的 `window_days` 为配置窗口换算成天后向上取整。当前日使用已提交快照。
 
-课程与教师的五维评分统计由 reviews 的 `GET /api/v1/reviews/statistics` 提供，时间范围、最低评分样本量及教师按课程等权汇总均由 reviews 执行。客户端对 2–5 门课程分别读取 reviews 统计，组合展示课程对比。
+首页按活动权重加总得到热度，样本量为有效计数之和。达到最低样本量后，按热度降序，再按来源和 ID 升序。每项权重在 0 至 10 亿之间，至少一项为正。课程活动归该课程，不计入关联教师的活动。
 
-我的投票委托 reviews 的当前请求人公开接口，只返回有效选择并再次检查目标权限，附带公开评价标题、关联课程 ID 与学校 ID。遇到已撤回或无权限评价时，单次请求最多扫描 500 条上游投票自动补齐页长。修改及取消使用 reviews 自身接口。
+首次查询读取活动表，每批最多 500 行，按 UTC 日、来源和活动 ID 续读。最多扫描 50 万行、累计 1 万个候选目标，超限返回暂不可用。活动的当前修订大于或等于投影修订时，使用来源当前计数。
 
-首次读取按热度降序、来源和对象 ID 升序固定排名。单项权重上限为 1e9。样本量按有效计数之和计算。游标绑定请求人、学校和榜单类型，后续各页按首屏顺序读取，逐页检查当前可见性。响应使用 window_days 表示统计窗口。
+活动来源明确停用时不参与汇总，故障或返回格式错误时查询失败。续页沿用首次排名，每页重新检查目标的当前可见性和学校范围。
 
-每次成功续页延长 24 小时有效期。过期时返回 410 snapshot_expired，界面提示主动刷新。刷新后重新计算排名。每个快照最多保存 10000 个目标，每个数据库最多保存 1024 个快照，新快照可复用过期位置。
+游标绑定请求人、榜单类型和学校。每次读取未过期快照时，续期至至少再保留 24 小时。过期返回 `410 snapshot_expired`，客户端可提示刷新并重新计算排名。每个数据库最多保存 1,024 个排行快照，过期位置可复用。
 
-窗口按 UTC 日查询，开始为 now−HeatWindow 所在日的零点（包含），结束为当前日之后的零点（不包含）。当前日使用已提交快照，窗口参数和当前时间在单次查询或重建开始时固定。
+## 本人投票与评分
 
-## 事件消费与重建
+本人投票从 reviews 的公开端口读取有效选择，再核验目标当前可见性。返回评价标题、课程及学校。跳过已撤回或不可见的条目，单次最多检查 500 条来源投票，续页使用返回的来源游标，最长 1,024 字节。
 
-事件 JSON Schema 位于 `contracts/discovery-event.schema.json`，相邻 `.sha256` 文件记录其 SHA-256 摘要并由模块检查核对。
+修改和取消投票使用 reviews 的接口。课程和教师的五维统计由 reviews 的 `GET /api/v1/reviews/statistics` 提供。课程对比由客户端分别读取 2 至 5 门课程的统计并组合展示。
 
-Service.Consume 接收 CloudEvents 1.0，source 为 catalog、reviews 或 resources，type 为来源名加 .discovery.v1，subject 与 data.target.id 一致。data 为完整 Document 快照，revision 为该来源对象单调递增修订号。
+## 数据与事件归属
 
-消费在一个事务内更新投影及 inbox，以 source、event_type 和事件 ID 去重，并记录接收时间 received_at。摘要计算前将时间戳归一化为 UTC 并统一空切片，避免相同时刻不同时区重放误报冲突。
-
-消费持有共享事务咨询锁，在同一事务内以事件类型区分回执。并发重复投递只提交一次投影写入，载荷不同则返回冲突。重建继续使用独占锁。
-
-所有检索词、游标和事件字符串均按 Unicode 码点数限长，并拒绝非法 UTF-8 与 NUL 字节。重复事件返回成功，相同标识不同载荷拒绝。低于或等于现有修订的事件只记 inbox，不改投影。删除必须保留高修订的不可见墓碑。
-
-活动使用独立事件 `discovery.activity.v1`。Schema 为 `contracts/discovery-activity.schema.json`，版本 1.2.0；相邻 `.sha256` 文件记录原始 UTF-8 文件的 SHA-256，完整检查验证摘要及字段归属。内容事件仅承载检索文档。
-
-活动快照保存在 search.activities，主键为 (source, id)，另以 (source, target.kind, target.id, day) 设置唯一约束。课程活动不会自动复制到关联教师。
-
-catalog 与 reviews 活动的目标为 catalog 的规范课程或教师；favorites 活动同时支持 resources 的学习资料，供 `Popular` 的 `kind=resource` 榜单汇总并经 `Sources.Current` 复核当前可见性。
-
-活动 ID 使用 `kind + "/" + base64url(UTF-8 对象 ID，无填充) + "/" + YYYY-MM-DD`，由 ActivityID 生成。事件 subject 等于活动 ID，封套 source 必须等于快照 source。不同来源可使用相同活动 ID，修订独立递增。
-
-活动目标 ID 最多 200 个 Unicode 码点。完整活动 ID 和 subject 最多 1,087 个字符，覆盖四字节码点编码后的长度。搜索与热门游标最多 2,048 字符。升级前的 inbox 回执继续按原事件表示计算摘要，并保留原来源与 ID 的去重范围。
-
-新修订完整替换同键快照，不把重复投递当作增量相加。零计数也必须显式发送。取消收藏、撤回或删除引起计数变化时，由拥有事实的模块发布更高修订；search 不反推来源事实。
-
-| 来源 | metrics 必需且仅允许的字段 | 来源统计规则 |
+| 来源 | 内容事件 | 检索投影 |
 | --- | --- | --- |
-| catalog | views | 同一账号对同一课程或教师详情每 UTC 日只计一次 |
-| reviews | reviews、interactions | 评价数与有效投票、回复互动数，依 reviews 的有效性规则 |
-| favorites | favorites | 当日净新增，取消后不得为负；跨日取消归属由 favorites 的公开规则说明 |
+| catalog | `catalog.discovery.v1` | 学校、课程和教师的规范 ID、标题、别名、归属和可见状态 |
+| reviews | `reviews.discovery.v1` | 评价的公开检索标题、课程和教师关联、时间及可见状态 |
+| resources | `resources.discovery.v1` | 学习资料的公开标题、学校、课程、时间及可见状态 |
 
-metrics 字段值为 0–1000000000 的整数，禁止负值和来源未拥有的字段，即使越权字段值为 0 也拒绝。Schema 的三个分支同时约束封套和载荷的来源。运行时还校验真实日期、规范活动 ID 和封套一致性。
+search 维护 `documents` 内容投影、`activities` 活动快照、`inbox` 消费回执、`rankings` 排名和 `state` 索引状态及游标密钥。业务数据由各来源持有。评价正文、作者身份和原始评分留在来源模块。
 
-CurrentActivity 按请求人检查来源活动当前可见性与修订，Current 再检查目标当前权限。来源活动可见且 `live.Revision >= d.Revision` 时采用来源最新计数，不可见或 `live.Revision < d.Revision` 的快照排除计入。来源明确未启用时返回 ErrSourceDisabled，该来源贡献为零；超时、查询失败和格式错误返回暂不可用。
+[内容事件契约](../../contracts/discovery-event.schema.json)采用 CloudEvents 1.0，`subject` 等于对象 ID，`data` 为完整文档快照。来源提交修改、合并、下架或删除时发送新的对象修订，删除使用不可见墓碑。
 
-重建先读取 catalog、reviews、resources 的 DiscoverySnapshot，再读取 catalog、reviews、favorites 的窗口内 ActivitySnapshot。每批最多 100 条，来源游标必须保持一致性快照、前进且无遗漏。来源首次返回 ErrSourceDisabled 时跳过该来源。
+[活动事件契约](../../contracts/discovery-activity.schema.json)版本为 1.2.0，类型为 `discovery.activity.v1`。每条活动是某个来源、对象与 UTC 日的完整计数。所有所属指标均必填，包括零值，取值为 0 至 10 亿的整数。
 
-重建持有投影写锁，relay 可重试超时消费；来源快照事务应独立于 relay 确认，避免互相等待。内容与活动投影按批次写入并在同一事务发布，任一已启用来源失败时全部回滚。重建仅将本次窗口内缺失的可见活动转为不可见墓碑，保留窗口外的历史活动快照。
-
-search.documents 只保存 catalog 的 school、course、teacher，reviews 的 review，以及 resources 的 resource。服务层与数据库均校验类型和来源，缺失或非法类型拒绝写入。热门活动由独立事件写入 search.activities。
-
-重建与查询使用 PostgreSQL 事务隔离，查询保留旧的已提交投影，只有完整重建才发布新投影。失败整体回滚，低于已消费修订的快照拒绝。缺失对象保留不可见墓碑，延迟到达的旧事件无法复活内容。
-
-初次部署需要成功重建后才能查询。`Service.Status` 与 `postgres.Repository.Status` 返回 `ready`、最近重建时间与窗口、各来源投影及 `inbox` 计数。`Config.Observer` 记录脱敏耗时、来源模块、错误分类码、扫描行数与修订跳过数，不记录查询词或用户身份。
-
-`search.inbox` 记录 `received_at` 时间。`postgres.Maintenance` 使用独立维护身份（仅授予 `inbox` 与 `activities` 的 `SELECT`、`DELETE`），按每批最多 1000 条、3 秒超时有界清理严格早于截止时间的回执与超窗活动快照。
-
-清理截止时间禁止落入 24 小时重放窗口与 366 天最大热度窗口内。正常索引更新目标为 60 秒，尚未进行端到端延迟验证。
-
-## 来源事件与公开接口
-
-下列事件为 search 消费约定。内容事件需要完整公开投影快照；活动事件需要所属来源的完整日计数。来源实现与 backend 适配的实际组合仍需联调验收。
-
-| 来源 | 需要提供的事件 | 必需事实 |
+| 活动来源 | 所属指标 | 目标与计数 |
 | --- | --- | --- |
-| catalog | catalog.discovery.v1 | 每个学校、课程或教师的规范 ID、学校、公开标题、修订和可见状态；导入、合并、修改及删除均逐对象发出 |
-| reviews | reviews.discovery.v1 | 有效课程评价的公开检索标题、规范课程 ID、教师归属、事件时间及可见状态；修订、撤回、到期和删除均发出 |
-| resources | resources.discovery.v1 | 资料公开标题、学校、课程关联、修订及当前可见状态；更新、下架及删除均发出 |
-| catalog、reviews、favorites | discovery.activity.v1 | 各来源拥有的日指标快照，字段和来源必须符合活动 Schema |
+| catalog | `views` | 课程和教师。同一账号对同一对象的详情浏览每 UTC 日计一次 |
+| reviews | `reviews`、`interactions` | 课程和教师的评价数与有效投票和回复，按 reviews 的有效性规则 |
+| favorites | `favorites` | 课程、教师和学习资料的日净新增。跨日取消按 favorites 的规则归属 |
 
-来源还需要提供按请求人检查当前对象与活动的批量或单条公开接口，以及包含墓碑的一致性快照分页接口。reviews 需要提供当前请求人的有效投票分页。community 当前只登记可选依赖，尚无事件接入。
+活动 `subject` 等于活动 ID。ID 为 `kind/base64url(对象 ID)/YYYY-MM-DD`，对象 ID 使用 UTF-8 后做无填充编码。对象 ID 最多 200 个 Unicode 码点，活动 ID 最多 1,087 字符。封套与快照的来源一致，修订由来源独立递增。
 
-活动来源必须各自提供公开快照和当前可见性接口。search 不读取来源业务表，不要求任何来源汇总其他模块的指标。
+同一活动来源、目标类型、目标 ID 和日期只保存一份快照。更高修订替换整份快照，重复投递不累加。撤回或取消引起的指标变化由来源发送新修订。
 
-## 来源接口
+## 消费与重建
 
-Sources 是 backend 的来源分发适配器，source 参数选择提供方。接口形状如下，返回类型也可由来源定义等价 DTO，再由 backend 转换，来源无需依赖 search 包。limit 为 1–100，初次 cursor 为空，空 next 表示结束。fromDay 和 toDay 必须是 UTC 零点，范围为左闭右开。
+`Consume` 和 `ConsumeActivity` 持有共享事务咨询锁，按来源、事件类型和事件 ID 去重。投影与 inbox 同事务写入。摘要统一时间为 UTC、规范空切片。相同 ID 与载荷重放成功，载荷变化冲突。旧修订记录回执但不覆盖投影。
 
-```go
-DiscoverySnapshot(ctx context.Context, source, cursor string, limit int) ([]Document, string, error)
-ActivitySnapshot(ctx context.Context, source string, fromDay, toDay time.Time, cursor string, limit int) ([]ActivitySnapshot, string, error)
-CurrentActivity(ctx context.Context, principal, source, activityID string) (ActivitySnapshot, bool, error)
-CurrentBatch(ctx context.Context, user, source string, targets []Target) ([]Document, error)
-CurrentActivities(ctx context.Context, user, source string, ids []string) ([]ActivitySnapshot, error)
-```
+迁移保留历史消费回执及其原有去重范围。重建持有独占事务咨询锁，分批读取内容来源和窗口内活动来源。每来源最多 10,000 批，每批最多 100 条。来源必须返回前进的游标，停用来源可在首页明确跳过。
 
-CurrentBatch 与 CurrentActivities 为可选批量扩展接口，每批最多 100 条；未实现时回退到单条接口。单次热门查询首次遇到来源返回 ErrSourceDisabled 后，后续数据库分页直接跳过该来源且不计入扫描配额。
-
-catalog、reviews、favorites 各自实现以下提供方端口。source 由模块固定，不能接受调用方指定其他来源。分页后续请求沿用原窗口、快照版本和上限；来源查询通过公开 Repository/Service 接口提供。
-
-```go
-ActivitySnapshot(ctx context.Context, fromDay, toDay time.Time, cursor string, limit int) ([]search.ActivitySnapshot, string, error)
-CurrentActivity(ctx context.Context, principal, activityID string) (search.ActivitySnapshot, bool, error)
-```
-
-ActivitySnapshot 返回窗口内完整日快照及墓碑。CurrentActivity 返回当前可读的快照；bool=false 表示目标不存在或不可读。来源未启用由 backend 适配器返回 ErrSourceDisabled，不能把普通来源故障映射为未启用。
-
-PostgreSQL 14 及更早版本的升级库可能保留 PUBLIC 对 public schema 的 CREATE 权限。数据库负责人应先执行 `REVOKE CREATE ON SCHEMA public FROM PUBLIC`。运行身份可保留 public 的 USAGE，并须通过复制权限和搜索对象属主角色检查。[PostgreSQL 文档](https://www.postgresql.org/docs/15/ddl-schemas.html#DDL-SCHEMAS-PRIV)
-
-## Backend 装配
-
-1. 使用独立迁移身份调用 postgres.Migrate。创建专用运行身份，授予 schema USAGE，documents 与 activities 的 SELECT、INSERT、UPDATE，state 的 SELECT、UPDATE，inbox 的 SELECT、INSERT；禁止 inbox 改删、各表 TRUNCATE 及跨模块访问。
-2. 创建运行身份连接池，设置连接数与连接超时，调用 CheckRuntime。实现 Sources，以各模块公开接口提供当前权限查询、重建快照及我的投票。
-3. 从后台配置读取最低活动样本量、热度窗口、权重和查询超时，调用 New。使用后台重建任务调用 Rebuild，成功后开放 HTTP 能力。
-4. 把 httpapi.Handler 挂到 /api/v1/search 路由，Authenticate 从 platform 已验证身份提取稳定请求人标识，不能接受客户端自报的用户或学校。
-5. 将内容 discovery.v1 事件接入 Service.Consume，将 catalog、reviews、favorites 的 discovery.activity.v1 接入 Service.ConsumeActivity。relay 绑定已认证来源。业务与 outbox 同事务执行 pg_notify，relay LISTEN 各模块频道，每批最多 100 条。
-6. relay 启动及重连后立即补读，每 60 秒读取未发送部分索引兜底。消费成功后确认发送；失败从 5 秒指数退避，上限一小时，累计 24 小时进入待处理队列，重试保留原事件 ID。
-7. 来源不可用时保留已完成业务写入，相关查询返回暂不可用。来源修订更新后核对权限撤销、删除、投影重建和重复投递，并测量 60 秒更新目标。
-
-relay、生产模块 outbox 与公开接口适配器由 backend 及来源负责人装配。本仓提供消费者，未修改 backend 依赖、工作区锁文件或任何来源模块。
-
-## 验证范围
-
-scenario_tests 登记 DS-01、DS-04 至 DS-07、DS-SCHOOL-01 与 DS-COURSE-01。集成测试使用隔离 PostgreSQL，覆盖权限过滤、分页、热度权重与窗口、热榜快照翻页、当前投票、多源并发共享锁消费、旧修订、重建回滚、SDK 端到端契约及运行身份越权拒绝。
-
-| 场景 | 验收结果 | 测试函数 |
-| --- | --- | --- |
-| DS-01：搜索与热门进入详情 | 当前权限过滤、分页游标、热门课程与教师固定排名续页及 SDK 契约一致 | TestVisibilityPaginationAndHotTargets、TestSDKEndToEndContractAndPopularSnapshotPagination |
-| DS-04：我的投票 | 仅返回当前请求人有效且目标可见的投票，超限及超时按契约响应 | TestMyVotesHTTPAndTimeout、TestSDKEndToEndContractAndPopularSnapshotPagination |
-| DS-05：热度配置 | 多来源汇总、来源缺失、权重、UTC 窗口、最低样本量及权限生效，越权指标拒绝 | TestHeatWeightsWindowAndTeachers、TestActivityOwnership |
-| DS-06：投影写入失败 | 投影与 inbox 事务整体回滚，不保留部分写入 | TestProjectionFailureRollback、TestActivityReplayAndRebuild |
-| DS-07：重复乱序与重建 | 重复事件去重，多来源共享锁并发写入与排他锁重建隔离，旧修订不覆盖新状态，运行身份越权拒绝 | TestContentDocumentKinds、TestProjectionReplayRebuildAndIsolation、TestActivityReplayAndRebuild、TestActivitySnapshotPagination、TestSharedAdvisoryLockAllowsConcurrentMultiSourceWrites |
-| DS-SCHOOL-01：学校检索 | 完整码、五位码、名称、别名、字面匹配、分页、当前撤权与迁移保留生效 | TestSchoolSearchCodesNamesAliasesCurrentRightsAndRebuild、TestSchoolProjectionMigrationPreservesExistingDocuments |
-| DS-COURSE-01：课程字段搜索 | 当前课名、课号、英文名、曾用课号与曾用名检索及事件边界校验生效 | TestCourseSearchIncludesCurrentFormerAndEnglishNames、TestCourseSearchFieldsValidateAtEventBoundary |
-
-2026-11-18 在隔离 PostgreSQL 18.6 上执行完整 make check，通过 SDK 一致性、仓库与导入边界、Schema 摘要、文档、gofmt、vet、race 测试、构建及工作流检查。真实账号与生产部署尚未验收。
-
-## 学校检索
-
-GET /api/v1/search 的 kind 增加 school。学校文档由 catalog 的 discovery 事件或重建快照提供，包含规范 ID、学校、名称、可选 code 和登记 aliases。课程、教师、评价和资料的检索与热门计数规则保持不变。
-
-q 去除首尾空白。学校 ID 精确匹配，code 按不区分大小写精确匹配，五位数字同时匹配十位数字 ID 或 code 的后五位，不把其他片段作为模糊代码。名称与登记别名始终按不区分大小写的字面子串匹配（含纯数字别名）。不存在的学校返回空列表。
-
-名称与登记别名按不区分大小写的字面子串匹配，支持“北京航空航天大学”“北航”和 Beihang。百分号、下划线和反斜线不作为通配符。学校字段不复制到其他类型以扩大匹配范围。
-
-返回前继续通过来源公开端口检查当前权限、可见性和修订。来源故障返回 unavailable，旧别名投影不绕过修订检查。完整重建发布新快照；学校停用后立即不可见，旧事件不能恢复旧修订。
-
-迁移仅在约束缺失或未包含学校类型时通过 NOT VALID 与 VALIDATE CONSTRAINT 扩大 documents_content_kind 约束，一致时跳过 DDL，避免滚动升级阻塞线上读写，并保留已有投影与 inbox。升级后执行提供方支持的重建，确保学校与别名完整进入索引。学校不参与热门活动计数。
-
-DS-SCHOOL-01 覆盖完整码、五位码、名称、别名、无结果、字面匹配、分页、当前撤权与别名修订重建。
-
-## 课程字段搜索
-
-DS-COURSE-01：课程搜索同时匹配当前名称、课程号、英文名、曾用课程号和曾用名。提供方的 `english_name`、`former_codes` 和 `former_names` 是独立字段，课程英文名不写入 aliases。返回结果使用规范课程 ID，并携带这些字段供客户端展示。
-
-课程文档仍需通过提供方当前权限、可见性和修订检查。原课程的旧搜索文档由 tombstone 隐藏，完整重建只发布规范课程。学校代码、学校别名和字面字符搜索沿用原有规则。
-
-热门排行在活动窗口内按日期、来源和 ID 进行索引续读，再按热度排序。迁移使用操作系统提供的密码学随机数生成 32 字节游标密钥，并保留数据库中已有的密钥。
+重建一次事务发布完整投影，任何已启用来源失败都保留旧投影。缺失对象转为不可见墓碑，保留较高修订。活动重建只处理统计窗口内的快照，保留窗口外历史。迁移与日常维护见[装配指南](../guide/integration.md)。
