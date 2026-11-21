@@ -31,7 +31,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	user, e := h.Authenticate(r)
 	if e != nil {
-		if isAuthDependencyFailure(e) {
+		if errors.Is(e, s.ErrForbidden) || isAuthDependencyFailure(e) {
 			fail(w, r, e)
 			return
 		}
@@ -123,6 +123,9 @@ func fail(w http.ResponseWriter, r *http.Request, e error) {
 	case errors.Is(e, s.ErrUnauthenticated):
 		code = http.StatusUnauthorized
 		name = "unauthenticated"
+	case errors.Is(e, s.ErrForbidden):
+		code = http.StatusForbidden
+		name = "permission_denied"
 	case errors.Is(e, s.ErrNotFound):
 		code = http.StatusNotFound
 		name = "not_found"

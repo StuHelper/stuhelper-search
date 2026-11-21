@@ -11,6 +11,7 @@ var (
 	ErrSnapshotExpired = errors.New("snapshot_expired")
 	ErrInput           = errors.New("invalid_input")
 	ErrUnauthenticated = errors.New("unauthenticated")
+	ErrForbidden       = errors.New("permission_denied")
 	ErrNotFound        = errors.New("not_found")
 	ErrUnavailable     = errors.New("unavailable")
 	ErrIndexBuilding   = fmt.Errorf("%w: index_building", ErrUnavailable)

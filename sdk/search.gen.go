@@ -23,6 +23,7 @@ const (
 	InvalidInput     ErrorCode = "invalid_input"
 	MethodNotAllowed ErrorCode = "method_not_allowed"
 	NotFound         ErrorCode = "not_found"
+	PermissionDenied ErrorCode = "permission_denied"
 	SnapshotExpired  ErrorCode = "snapshot_expired"
 	Timeout          ErrorCode = "timeout"
 	Unauthenticated  ErrorCode = "unauthenticated"
@@ -41,6 +42,8 @@ func (e ErrorCode) Valid() bool {
 	case MethodNotAllowed:
 		return true
 	case NotFound:
+		return true
+	case PermissionDenied:
 		return true
 	case SnapshotExpired:
 		return true
@@ -189,11 +192,11 @@ func (e PopularParamsKind) Valid() bool {
 
 // Error 稳定错误响应体，供客户端映射多语言文案与无障碍状态提示。
 type Error struct {
-	// Code 稳定错误码，包含参数非法、未登录、路径或方法不支持、索引构建中、依赖不可用、超时及请求取消。
+	// Code 稳定错误码，供客户端区分无有效登录会话、有效会话被拒绝及其他查询失败。
 	Code ErrorCode `json:"code"`
 }
 
-// ErrorCode 稳定错误码，包含参数非法、未登录、路径或方法不支持、索引构建中、依赖不可用、超时及请求取消。
+// ErrorCode 稳定错误码，供客户端区分无有效登录会话、有效会话被拒绝及其他查询失败。
 type ErrorCode string
 
 // Item 经当前权限复核后的公开搜索或热门结果条目。
@@ -877,6 +880,8 @@ type SearchResponse struct {
 	JSON400 *Error
 	// JSON401 the response for an HTTP 401 `application/json` response
 	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *Error
 	// JSON405 the response for an HTTP 405 `application/json` response
@@ -906,6 +911,11 @@ func (r SearchResponse) GetJSON400() *Error {
 // GetJSON401 returns the response for an HTTP 401 `application/json` response
 func (r SearchResponse) GetJSON401() *Error {
 	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r SearchResponse) GetJSON403() *Error {
+	return r.JSON403
 }
 
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
@@ -981,6 +991,8 @@ type MyVotesResponse struct {
 	JSON400 *Error
 	// JSON401 the response for an HTTP 401 `application/json` response
 	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *Error
 	// JSON405 the response for an HTTP 405 `application/json` response
@@ -1010,6 +1022,11 @@ func (r MyVotesResponse) GetJSON400() *Error {
 // GetJSON401 returns the response for an HTTP 401 `application/json` response
 func (r MyVotesResponse) GetJSON401() *Error {
 	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r MyVotesResponse) GetJSON403() *Error {
+	return r.JSON403
 }
 
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
@@ -1085,6 +1102,8 @@ type PopularResponse struct {
 	JSON400 *Error
 	// JSON401 the response for an HTTP 401 `application/json` response
 	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *Error
 	// JSON405 the response for an HTTP 405 `application/json` response
@@ -1116,6 +1135,11 @@ func (r PopularResponse) GetJSON400() *Error {
 // GetJSON401 returns the response for an HTTP 401 `application/json` response
 func (r PopularResponse) GetJSON401() *Error {
 	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r PopularResponse) GetJSON403() *Error {
+	return r.JSON403
 }
 
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
@@ -1257,6 +1281,13 @@ func ParseSearchResponse(rsp *http.Response) (*SearchResponse, error) {
 		}
 		response.JSON401 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -1355,6 +1386,13 @@ func ParseMyVotesResponse(rsp *http.Response) (*MyVotesResponse, error) {
 		}
 		response.JSON401 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -1452,6 +1490,13 @@ func ParsePopularResponse(rsp *http.Response) (*PopularResponse, error) {
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest Error
