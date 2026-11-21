@@ -33,6 +33,7 @@ scenario_tests:
     - integration_test.go#TestVisibilityPaginationAndHotTargets
     - popular_scale_test.go#TestPopularKeysetCursorSurvivesScoreChangeAndRemoval
     - httpapi_contract_test.go#TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed
+    - httpapi_contract_test.go#TestAuthenticatedDenialIsDeclaredAndDecodedOnAllRoutes
     - index_collation_cursor_test.go#TestIndexOrderUnicodeCollationOpaqueCursorAndSchoolQueryRules
     - error_window_test.go#TestErrorCodeEnumRetryAfterAndPopularWindowDays
     - filter_summary_test.go#TestSummaryFieldsAndMultiDimensionalFilters
@@ -41,6 +42,7 @@ scenario_tests:
     - sdk_contract_test.go#TestSDKEndToEndContractAndPopularSnapshotPagination
     - integration_test.go#TestMyVotesHTTPAndTimeout
     - httpapi_contract_test.go#TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed
+    - httpapi_contract_test.go#TestAuthenticatedDenialIsDeclaredAndDecodedOnAllRoutes
     - filter_summary_test.go#TestMyVotesSummaryFieldsAndBoundedPageFill
   DS-05:
     - activity_window_test.go#TestPopularBeijingCalendarWindow

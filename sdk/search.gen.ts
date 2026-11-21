@@ -142,10 +142,10 @@ export interface components {
         /** @description 稳定错误响应体，供客户端映射多语言文案与无障碍状态提示。 */
         Error: {
             /**
-             * @description 稳定错误码，包含参数非法、未登录、路径或方法不支持、索引构建中、依赖不可用、超时及请求取消。
+             * @description 稳定错误码，供客户端区分无有效登录会话、有效会话被拒绝及其他查询失败。
              * @enum {string}
              */
-            code: "invalid_input" | "unauthenticated" | "not_found" | "method_not_allowed" | "unavailable" | "timeout" | "cancelled" | "index_building" | "snapshot_expired";
+            code: "invalid_input" | "unauthenticated" | "permission_denied" | "not_found" | "method_not_allowed" | "unavailable" | "timeout" | "cancelled" | "index_building" | "snapshot_expired";
         };
     };
     responses: never;
@@ -209,6 +209,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description 会话身份通过验证，但当前账号禁止访问，例如已完成注销（permission_denied）。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description 请求路径不存在（not_found）。 */
             404: {
                 headers: {
@@ -238,10 +247,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description 搜索索引正在初始化（index_building）或上游依赖暂不可用（unavailable）。 */
+            /** @description 搜索索引正在初始化（index_building），或身份验证、查询所需的依赖暂不可用（unavailable）。 */
             503: {
                 headers: {
-                    /** @description 建议客户端自动重试前等待的秒数。 */
+                    /** @description 建议客户端自动重试前等待的秒数。索引构建中为 10 秒，依赖暂不可用为 5 秒。 */
                     "Retry-After"?: string;
                     [name: string]: unknown;
                 };
@@ -305,6 +314,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description 会话身份通过验证，但当前账号禁止访问，例如已完成注销（permission_denied）。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description 请求路径不存在（not_found）。 */
             404: {
                 headers: {
@@ -343,10 +361,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description 搜索索引正在初始化（index_building）或活动来源暂不可用（unavailable）。 */
+            /** @description 搜索索引正在初始化（index_building），或身份验证、活动来源暂不可用（unavailable）。 */
             503: {
                 headers: {
-                    /** @description 建议客户端自动重试前等待的秒数。 */
+                    /** @description 建议客户端自动重试前等待的秒数。索引构建中为 10 秒，依赖暂不可用为 5 秒。 */
                     "Retry-After"?: string;
                     [name: string]: unknown;
                 };
@@ -406,6 +424,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description 会话身份通过验证，但当前账号禁止访问，例如已完成注销（permission_denied）。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description 请求路径不存在（not_found）。 */
             404: {
                 headers: {
@@ -435,10 +462,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description 评价来源暂不可用（unavailable）。 */
+            /** @description 身份验证或评价来源暂不可用（unavailable）。 */
             503: {
                 headers: {
-                    /** @description 建议客户端自动重试前等待的秒数。 */
+                    /** @description 建议客户端自动重试前等待的秒数。依赖暂不可用时为 5 秒。 */
                     "Retry-After"?: string;
                     [name: string]: unknown;
                 };

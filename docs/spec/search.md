@@ -1,7 +1,7 @@
 ---
 type: spec
 status: Accepted
-updated: 2026-11-21
+updated: 2026-11-22
 ---
 
 # 搜索与热门发现模块
@@ -16,7 +16,11 @@ updated: 2026-11-21
 
 [OpenAPI](../../contracts/search.openapi.json) 定义请求参数和错误码。三个接口要求登录，分页默认 20 条、最多 100 条。参数白名单按路由校验，编码错误、重复或未知参数返回 `400 invalid_input`。
 
-模块 HTTP Handler 在搜索或热门的初始重建未完成时返回 `503 index_building`。来源故障返回 `503 unavailable`，模块 Handler 的 503 附带 `Retry-After`。请求超时和客户端取消分别返回 504、499。已知路由的非 GET 请求返回 405 和 `Allow: GET`。
+缺少有效会话返回 `401 unauthenticated`。会话身份有效但当前账号被禁止访问时返回 `403 permission_denied`，例如已完成注销。独立装配可由认证适配器返回 `search.ErrForbidden` 表达同一结果。
+
+搜索或热门的初始重建未完成时，模块返回 `503 index_building` 和 `Retry-After: 10`。身份验证或查询依赖暂不可用时返回 `503 unavailable` 和 `Retry-After: 5`。重试等待时间以秒为单位。
+
+请求超时和客户端取消分别返回 504、499。模块 HTTP 处理器对已知路由的非 GET 请求返回 405 和 `Allow: GET`。
 
 ## 内容检索
 
