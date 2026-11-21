@@ -51,7 +51,7 @@ func TestObserverStatusAndBoundedMaintenanceCleanup(t *testing.T) {
 	if !st.Ready || st.RebuiltAt == nil || !st.RebuiltAt.Equal(now) {
 		t.Fatalf("unexpected status ready/rebuilt_at: %+v", st)
 	}
-	if st.ActivityWindowFrom != "2026-11-02" || st.ActivityWindowTo != "2026-11-10" {
+	if st.ActivityWindowFrom != "2026-11-03" || st.ActivityWindowTo != "2026-11-10" {
 		t.Fatalf("unexpected rebuild window: %+v", st)
 	}
 	if st.Documents["catalog"].Visible != 1 || st.Activities["catalog"].Visible != 1 || st.InboxCount != 2 {
@@ -112,7 +112,7 @@ func TestObserverStatusAndBoundedMaintenanceCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	activityCutoff := "2025-11-08" // now (2026-11-09) - 366d is 2025-11-08
+	activityCutoff := "2025-11-09" // The 366-date window starts 365 days before today.
 	for i, day := range []string{"2025-10-01", "2025-10-02", "2025-10-03", activityCutoff} {
 		act := activity("catalog", "course", fmt.Sprintf("hist-%d", i), day, map[string]int64{"views": 1})
 		if err := svc.ConsumeActivity(ctx, activityEvent(act, fmt.Sprintf("hist-ev-%d", i))); err != nil {
@@ -186,6 +186,17 @@ func TestObserverStatusAndBoundedMaintenanceCleanup(t *testing.T) {
 	}
 	if err := db.QueryRow(`SELECT count(*) FROM search.activities WHERE day=$1::date`, activityCutoff).Scan(&boundaryAct); err != nil || boundaryAct != 1 {
 		t.Fatalf("boundary activity row was deleted: %d %v", boundaryAct, err)
+	}
+
+	clock := time.Date(2026, 11, 9, 15, 59, 59, 0, time.UTC)
+	maint.Now = func() time.Time { return clock }
+	cutoff := s.CleanupOptions{ActivityBeforeDay: "2025-11-10"}
+	if _, err := maint.Cleanup(ctx, cutoff); !errors.Is(err, s.ErrInput) {
+		t.Fatalf("ahead of the Beijing cutoff: %v", err)
+	}
+	clock = clock.Add(time.Second)
+	if result, err := maint.Cleanup(ctx, cutoff); err != nil || result.DeletedActivities != 1 {
+		t.Fatalf("cleanup at Beijing midnight: %+v %v", result, err)
 	}
 }
 

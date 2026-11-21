@@ -3,11 +3,12 @@ package search
 import (
 	"context"
 	"errors"
-	"math"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/StuHelper/stuhelper-search/internal/activityday"
 )
 
 const maxPopularCandidates = 10000
@@ -49,8 +50,8 @@ func (s *Service) scanPopularActivities(ctx context.Context, user, kind string) 
 	startTime := time.Now()
 	scores := map[Target]*rankedCandidate{}
 	disabled := map[string]bool{}
-	from, to := s.activityWindow()
-	f := ActivityFilter{Kind: kind, From: from, To: to, Limit: 500, AfterDay: from.UTC().Format(time.DateOnly)}
+	from, to := activityday.Window(s.config.Now(), s.windowDays)
+	f := ActivityFilter{Kind: kind, From: from, To: to, Limit: 500, AfterDay: activityday.Date(from)}
 	batchSrc, hasBatch := s.sources.(BatchActivitySource)
 	scanned := 0
 	for {
@@ -223,9 +224,8 @@ func (s *Service) currentRanked(ctx context.Context, user string, targets []Targ
 }
 
 func (s *Service) PopularWithParams(ctx context.Context, user string, p PopularParams) (Page, error) {
-
 	start := time.Now()
-	out := Page{Items: []Item{}, WindowDays: int(math.Ceil(s.config.HeatWindow.Hours() / 24))}
+	out := Page{Items: []Item{}, WindowDays: s.windowDays}
 	if e := auth(user); e != nil {
 		return out, e
 	}
@@ -245,14 +245,23 @@ func (s *Service) PopularWithParams(ctx context.Context, user string, p PopularP
 	if after == "" {
 		targets, err = s.rankedTargets(ctx, user, p.Kind)
 	} else {
-		var index string
+		var position string
 		var ok bool
-		snapshot, index, ok = strings.Cut(after, ":")
+		snapshot, position, ok = strings.Cut(after, ":")
 		if !ok || len(snapshot) != 32 {
 			return out, ErrInput
 		}
+		index, days, hasDays := strings.Cut(position, ":")
 		offset, err = strconv.Atoi(index)
 		if err != nil || offset < 1 {
+			return out, ErrInput
+		}
+		if !hasDays {
+			// Older cursors refer to rankings built with the UTC calendar.
+			return out, ErrSnapshotExpired
+		}
+		out.WindowDays, err = strconv.Atoi(days)
+		if err != nil || out.WindowDays < 1 || out.WindowDays > activityday.MaxWindowDays {
 			return out, ErrInput
 		}
 		targets, err = s.repo.ResumeRanking(ctx, snapshot, s.config.Now(), rankingTTL)
@@ -286,7 +295,7 @@ func (s *Service) PopularWithParams(ctx context.Context, user string, p PopularP
 				return Page{}, err
 			}
 		}
-		out.NextCursor, err = s.sealCursor(ctx, scope, user, snapshot+":"+strconv.Itoa(offset))
+		out.NextCursor, err = s.sealCursor(ctx, scope, user, snapshot+":"+strconv.Itoa(offset)+":"+strconv.Itoa(out.WindowDays))
 	}
 	s.observe("popular", "", "ok", start, offset, 0)
 	return out, err

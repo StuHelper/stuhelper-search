@@ -106,6 +106,7 @@ type Repository interface {
 	Candidates(context.Context, Filter) ([]Document, error)
 	// Rebuild holds the projection write lock and atomically publishes all source snapshots.
 	Rebuild(context.Context, func(func([]Document) error, func([]ActivitySnapshot) error) error) error
+	// ApplyActivity records a receipt for any valid event and updates the projection only for ActivityEventType.
 	ApplyActivity(context.Context, ActivityEvent, string) error
 	Activities(context.Context, ActivityFilter) ([]ActivitySnapshot, error)
 }
@@ -117,6 +118,7 @@ type Sources interface {
 	// DiscoverySnapshot returns at most limit records, including tombstones, using a consistent source snapshot.
 	// A nonempty cursor must advance. Empty next marks the end. Disabled sources return ErrSourceDisabled.
 	DiscoverySnapshot(context.Context, string, string, int) ([]Document, string, error)
+	// ActivitySnapshot receives real Beijing midnight instants delimiting the inclusive start and exclusive end.
 	ActivitySnapshot(context.Context, string, time.Time, time.Time, string, int) ([]ActivitySnapshot, string, error)
 	CurrentActivity(context.Context, string, string, string) (ActivitySnapshot, bool, error)
 	MyVotes(context.Context, string, string, int) (Votes, error)
@@ -134,8 +136,9 @@ type BatchActivitySource interface {
 	CurrentActivities(ctx context.Context, user, source string, ids []string) ([]ActivitySnapshot, error)
 }
 type Config struct {
-	QueryTimeout       time.Duration
-	RebuildTimeout     time.Duration
+	QueryTimeout   time.Duration
+	RebuildTimeout time.Duration
+	// HeatWindow is expressed in 24-hour units. Fractional units round up to a whole Beijing calendar day.
 	HeatWindow         time.Duration
 	HeatWeights        [4]float64
 	MinimumHeatSamples int

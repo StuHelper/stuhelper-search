@@ -91,6 +91,9 @@ BEGIN
  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='search.state'::regclass AND attname='activity_to' AND NOT attisdropped) THEN
   ALTER TABLE search.state ADD COLUMN activity_to date;
  END IF;
+ IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='search.state'::regclass AND attname='activity_calendar' AND NOT attisdropped) THEN
+  ALTER TABLE search.state ADD COLUMN activity_calendar text NOT NULL DEFAULT 'UTC';
+ END IF;
 END $$;
 INSERT INTO search.state(id,ready) VALUES(true,false) ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS search.activities (
@@ -114,6 +117,12 @@ END $$;
 CREATE INDEX IF NOT EXISTS search_activity_window ON search.activities(kind,day);
 CREATE INDEX IF NOT EXISTS search_activities_day_key ON search.activities(day, source, id);
 CREATE INDEX IF NOT EXISTS search_activities_by_day_c ON search.activities(kind, day, source COLLATE "C", id COLLATE "C") WHERE (data->>'visible')::boolean;
+CREATE TABLE IF NOT EXISTS search.activity_calendar_archive (
+ calendar text NOT NULL CHECK(calendar IN ('UTC','Asia/Shanghai')),
+ source text NOT NULL, id text NOT NULL, kind text NOT NULL, object_id text NOT NULL,
+ day date NOT NULL, revision bigint NOT NULL, data jsonb NOT NULL,
+ PRIMARY KEY(calendar,source,id)
+);
 DO $$
 DECLARE
  tbl text;
@@ -121,7 +130,12 @@ BEGIN
  IF has_schema_privilege('public', 'search', 'USAGE,CREATE') THEN
   REVOKE ALL ON SCHEMA search FROM PUBLIC;
  END IF;
- FOREACH tbl IN ARRAY ARRAY['search.documents', 'search.inbox', 'search.state', 'search.activities'] LOOP
+ -- The deployment role configurator grants CRUD on the whole schema. With no
+ -- policies, RLS reserves the archive for its owner even under those grants.
+ IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid='search.activity_calendar_archive'::regclass) THEN
+  ALTER TABLE search.activity_calendar_archive ENABLE ROW LEVEL SECURITY;
+ END IF;
+ FOREACH tbl IN ARRAY ARRAY['search.documents', 'search.inbox', 'search.state', 'search.activities', 'search.activity_calendar_archive'] LOOP
   IF EXISTS (SELECT 1 FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) acl
              WHERE c.oid=tbl::regclass AND acl.grantee=0) THEN
    EXECUTE format('REVOKE ALL ON TABLE %s FROM PUBLIC', tbl);

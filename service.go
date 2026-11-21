@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/StuHelper/stuhelper-search/internal/activityday"
 )
 
 type cursorKeyProvider interface {
@@ -28,10 +30,12 @@ type Service struct {
 	sources     Sources
 	config      Config
 	fallbackKey []byte
+	windowDays  int
 }
 
 func New(repo Repository, sources Sources, c Config) (*Service, error) {
-	if repo == nil || sources == nil || c.QueryTimeout <= 0 || c.QueryTimeout > 30*time.Second || c.RebuildTimeout < 0 || c.RebuildTimeout > 30*time.Minute || c.HeatWindow <= 0 || c.HeatWindow > 366*24*time.Hour || c.MinimumHeatSamples < 1 || (len(c.CursorKey) != 0 && len(c.CursorKey) != 32) {
+	const day = 24 * time.Hour
+	if repo == nil || sources == nil || c.QueryTimeout <= 0 || c.QueryTimeout > 30*time.Second || c.RebuildTimeout < 0 || c.RebuildTimeout > 30*time.Minute || c.HeatWindow <= 0 || c.HeatWindow > activityday.MaxWindowDays*day || c.MinimumHeatSamples < 1 || (len(c.CursorKey) != 0 && len(c.CursorKey) != 32) {
 		return nil, ErrInput
 	}
 	if c.RebuildTimeout == 0 {
@@ -57,7 +61,8 @@ func New(repo Repository, sources Sources, c Config) (*Service, error) {
 	} else if _, err := rand.Read(fallback); err != nil {
 		return nil, ErrUnavailable
 	}
-	return &Service{repo: repo, sources: sources, config: c, fallbackKey: fallback}, nil
+	windowDays := int((c.HeatWindow-time.Nanosecond)/day) + 1
+	return &Service{repo: repo, sources: sources, config: c, fallbackKey: fallback, windowDays: windowDays}, nil
 }
 func validTarget(t Target) bool {
 	return t.ID != "" && searchText(t.ID, 200) && ((t.Source == "catalog" && (t.Kind == "school" || t.Kind == "course" || t.Kind == "teacher")) || (t.Source == "reviews" && t.Kind == "review") || (t.Source == "resources" && t.Kind == "resource"))
@@ -211,12 +216,28 @@ type windowRebuilder interface {
 	RebuildWindow(context.Context, time.Time, time.Time, func(func([]Document) error, func([]ActivitySnapshot) error) error) error
 }
 
+type activityBackfillReporter interface {
+	ActivityBackfillRequired(context.Context) (bool, error)
+}
+
 func (s *Service) Rebuild(ctx context.Context) error {
 	start := time.Now()
 	rebuiltAt := s.config.Now().UTC()
-	from, to := s.activityWindowAt(rebuiltAt)
 	ctx, cancel := context.WithTimeout(ctx, s.config.RebuildTimeout)
 	defer cancel()
+	days := s.windowDays
+	if repo, ok := s.repo.(activityBackfillReporter); ok {
+		pending, err := repo.ActivityBackfillRequired(ctx)
+		if err != nil {
+			s.observe("rebuild", "", errorCode(err, "storage_unavailable"), start, 0, 0)
+			return err
+		}
+		if pending {
+			days = activityday.MaxWindowDays
+		}
+	}
+	from, to := activityday.Window(rebuiltAt, days)
+
 	var activeSource string
 	var errCode = "storage_unavailable"
 	var scanned int
