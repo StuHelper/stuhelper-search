@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/StuHelper/stuhelper-search/contracts/discovery-activity.schema.json",
   "title": "Discovery activity event",
-  "x-schema-version": "1.2.0",
+  "x-schema-version": "2.0.0",
   "oneOf": [
     {
       "type": "object",
@@ -20,7 +20,7 @@
           "const": "catalog"
         },
         "type": {
-          "const": "discovery.activity.v1"
+          "const": "discovery.activity.v2"
         },
         "subject": {
           "type": "string",
@@ -71,6 +71,7 @@
             "day": {
               "type": "string",
               "format": "date",
+              "description": "活动按北京时间（Asia/Shanghai）零点切换后的日期。",
               "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
             },
             "revision": {
@@ -132,7 +133,7 @@
           "const": "reviews"
         },
         "type": {
-          "const": "discovery.activity.v1"
+          "const": "discovery.activity.v2"
         },
         "subject": {
           "type": "string",
@@ -183,6 +184,7 @@
             "day": {
               "type": "string",
               "format": "date",
+              "description": "活动按北京时间（Asia/Shanghai）零点切换后的日期。",
               "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
             },
             "revision": {
@@ -250,7 +252,7 @@
           "const": "favorites"
         },
         "type": {
-          "const": "discovery.activity.v1"
+          "const": "discovery.activity.v2"
         },
         "subject": {
           "type": "string",
@@ -327,6 +329,7 @@
             "day": {
               "type": "string",
               "format": "date",
+              "description": "活动按北京时间（Asia/Shanghai）零点切换后的日期。",
               "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
             },
             "revision": {
