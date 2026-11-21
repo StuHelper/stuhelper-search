@@ -7,9 +7,16 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/StuHelper/stuhelper-search/internal/activityday"
 )
 
-// ActivitySnapshot is one provider's complete daily counters for one canonical object.
+const (
+	ActivityEventType       = "discovery.activity.v2"
+	LegacyActivityEventType = "discovery.activity.v1"
+)
+
+// ActivitySnapshot is one provider's complete counters for one canonical object and Beijing date.
 // Missing providers contribute zero. Metrics are never transferred between providers.
 type ActivitySnapshot struct {
 	Source   string           `json:"source"`
@@ -30,12 +37,13 @@ type ActivityEvent struct {
 	Data        ActivitySnapshot `json:"data"`
 }
 type ActivityFilter struct {
-	// AfterDay selects window-ordered traversal; omitted by callers using the source/ID order.
+	// AfterDay is a Beijing date label. It selects day-ordered traversal and is empty for source/ID order.
 	AfterDay       string
 	ExcludeSources []string
 	Kind, After    string
-	From, To       time.Time
-	Limit          int
+	// From and To bound the Beijing dates [From, To).
+	From, To time.Time
+	Limit    int
 }
 
 // ActivityID is independent of provider; the database key includes Source.
@@ -83,7 +91,7 @@ func ValidateActivity(d ActivitySnapshot) error {
 }
 func (s *Service) ConsumeActivity(ctx context.Context, e ActivityEvent) error {
 	start := time.Now()
-	if e.SpecVersion != "1.0" || e.ID == "" || !searchText(e.ID, 200) || e.Type != "discovery.activity.v1" || e.Source != e.Data.Source || e.Subject != e.Data.ID || e.Time.IsZero() {
+	if e.SpecVersion != "1.0" || e.ID == "" || !searchText(e.ID, 200) || (e.Type != ActivityEventType && e.Type != LegacyActivityEventType) || e.Source != e.Data.Source || e.Subject != e.Data.ID || e.Time.IsZero() {
 		s.observe("consume_activity", "", "invalid_input", start, 0, 0)
 		return ErrInput
 	}
@@ -106,16 +114,8 @@ func (s *Service) ConsumeActivity(ctx context.Context, e ActivityEvent) error {
 	return err
 }
 
-// Daily windows include the UTC day containing now-HeatWindow and the current day.
-// From is inclusive; To is the next UTC midnight, exclusive.
-func (s *Service) activityWindow() (time.Time, time.Time) {
-	return s.activityWindowAt(s.config.Now().UTC())
-}
-func (s *Service) activityWindowAt(now time.Time) (time.Time, time.Time) {
-	now = now.UTC()
-	return now.Add(-s.config.HeatWindow).Truncate(24 * time.Hour), now.Truncate(24 * time.Hour).Add(24 * time.Hour)
-}
 func (s *Service) rebuildActivitiesWindow(ctx context.Context, from, to time.Time, put func([]ActivitySnapshot) error) (string, string, int, error) {
+	firstDay, afterLastDay := activityday.Date(from), activityday.Date(to)
 	scanned := 0
 	for _, source := range []string{"catalog", "reviews", "favorites"} {
 		cursor := ""
@@ -137,7 +137,7 @@ func (s *Service) rebuildActivitiesWindow(ctx context.Context, from, to time.Tim
 			seen[next] = true
 			for _, d := range docs {
 				scanned++
-				if ValidateActivity(d) != nil || d.Source != source || d.Day < from.Format(time.DateOnly) || d.Day >= to.Format(time.DateOnly) {
+				if ValidateActivity(d) != nil || d.Source != source || d.Day < firstDay || d.Day >= afterLastDay {
 					return source, "invalid_source_data", scanned, ErrUnavailable
 				}
 			}

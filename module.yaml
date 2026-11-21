@@ -43,6 +43,8 @@ scenario_tests:
     - httpapi_contract_test.go#TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed
     - filter_summary_test.go#TestMyVotesSummaryFieldsAndBoundedPageFill
   DS-05:
+    - activity_window_test.go#TestPopularBeijingCalendarWindow
+    - popular_cursor_test.go#TestPopularLegacyUTCCursorExpires
     - popular_scale_test.go#TestPopularFixedSnapshotRenewalExpiryAndRevocation
     - activity_test.go#TestHeatWeightsWindowAndTeachers
     - activity_test.go#TestActivityOwnership
@@ -51,11 +53,14 @@ scenario_tests:
     - activity_test.go#TestPopularCountsNewerLiveActivityRevisionWithoutDroppingHotTargets
     - resource_popular_recent_test.go#TestPopularResourcesAndRecentDiscovery
   DS-06:
+    - activity_window_test.go#TestLegacyActivityReplayCannotOverwriteBeijingCounters
     - sdk_contract_test.go#TestSharedAdvisoryLockAllowsConcurrentMultiSourceWrites
     - integration_test.go#TestProjectionFailureRollback
     - activity_test.go#TestActivityReplayAndRebuild
     - validation_inbox_test.go#TestUTF8NullValidationUnicodeLengthsAndInboxCanonicalDedup
   DS-07:
+    - activity_calendar_migration_test.go#TestActivityCalendarMigrationRollbackAndRebuild
+    - activity_calendar_migration_test.go#TestActivityCalendarArchiveDeniesRuntimeCRUD
     - validation_inbox_test.go#TestLegacyInboxReceiptsProtectBothEventTypes
     - observability_maintenance_test.go#TestSanitizedObservationsAcrossSnapshotPages
     - integration_test.go#TestContentDocumentKinds

@@ -3,8 +3,10 @@ package postgres
 import (
 	"context"
 	"database/sql"
-	s "github.com/StuHelper/stuhelper-search"
 	"time"
+
+	s "github.com/StuHelper/stuhelper-search"
+	"github.com/StuHelper/stuhelper-search/internal/activityday"
 )
 
 const (
@@ -13,7 +15,6 @@ const (
 	defaultCleanupTimeout = 3 * time.Second
 	maxCleanupTimeout     = 3 * time.Second
 	minInboxRetention     = 24 * time.Hour
-	maxHeatWindowDays     = 366
 )
 
 // Maintenance executes bounded retention cleanup using a dedicated least-privilege database role.
@@ -100,8 +101,8 @@ func (m *Maintenance) Cleanup(ctx context.Context, opts s.CleanupOptions) (s.Cle
 		if err != nil || day.Format(time.DateOnly) != opts.ActivityBeforeDay {
 			return s.CleanupResult{}, s.ErrInput
 		}
-		earliestWindowStart := now.Add(-maxHeatWindowDays * 24 * time.Hour).Truncate(24 * time.Hour)
-		if day.After(earliestWindowStart) {
+		earliestWindowStart, _ := activityday.Window(now, activityday.MaxWindowDays)
+		if opts.ActivityBeforeDay > activityday.Date(earliestWindowStart) {
 			return s.CleanupResult{}, s.ErrInput
 		}
 	}

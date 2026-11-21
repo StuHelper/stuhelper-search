@@ -48,7 +48,7 @@ func activity(src, kind, id, day string, metrics map[string]int64) s.ActivitySna
 	return s.ActivitySnapshot{Source: src, ID: s.ActivityID(target, day), Target: target, Day: day, Revision: 1, Visible: true, Metrics: metrics}
 }
 func activityEvent(d s.ActivitySnapshot, id string) s.ActivityEvent {
-	return s.ActivityEvent{SpecVersion: "1.0", ID: id, Source: d.Source, Type: "discovery.activity.v1", Subject: d.ID, Time: now, Data: d}
+	return s.ActivityEvent{SpecVersion: "1.0", ID: id, Source: d.Source, Type: s.ActivityEventType, Subject: d.ID, Time: now, Data: d}
 }
 func addActivity(t *testing.T, svc *s.Service, f *source, d s.ActivitySnapshot) {
 	t.Helper()
@@ -73,7 +73,7 @@ func expectPopular(t *testing.T, svc *s.Service, kind string, want ...string) {
 	}
 }
 
-// DS-05: Providers aggregate per object; weights, UTC windows and minimum samples apply after aggregation.
+// DS-05: Providers aggregate per object using the Beijing window, weights and minimum samples.
 func TestHeatWeightsWindowAndTeachers(t *testing.T) {
 	svc, repo, f, _ := setup(t)
 	for _, kind := range []string{"course", "teacher"} {
@@ -88,8 +88,8 @@ func TestHeatWeightsWindowAndTeachers(t *testing.T) {
 		addActivity(t, svc, f, activity("reviews", kind, "b", "2026-11-09", map[string]int64{"reviews": 1, "interactions": 1}))
 		addActivity(t, svc, f, activity("favorites", kind, "b", "2026-11-09", map[string]int64{"favorites": 1}))
 		// Lower boundary inclusive, previous day excluded; tomorrow excluded.
-		addActivity(t, svc, f, activity("catalog", kind, "b", "2026-11-02", map[string]int64{"views": 1}))
-		for _, day := range []string{"2026-11-01", "2026-11-10"} {
+		addActivity(t, svc, f, activity("catalog", kind, "b", "2026-11-03", map[string]int64{"views": 1}))
+		for _, day := range []string{"2026-11-02", "2026-11-10"} {
 			addActivity(t, svc, f, activity("catalog", kind, "a", day, map[string]int64{"views": 1000}))
 		}
 		expectPopular(t, svc, kind, "b", "a")
