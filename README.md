@@ -1,20 +1,24 @@
+---
+type: index
+status: Accepted
+updated: 2026-11-21
+---
+
 # StuHelper Search
 
-search 提供学校代码、名称与别名检索，课程（含课程号、曾用课号、英文名与曾用名）、教师、评价与学习资料关键词检索，热门课程与教师排行，以及我的投票查询。本仓库为独立 Go 模块库，由 backend 注入身份认证、来源公开接口与事件 relay。
+search 提供学校、课程、教师、评价和学习资料检索，热门课程、教师和资料排行，以及本人投票查询。backend 通过可信身份和来源模块的公开接口装配查询，并接收来源事件维护投影。
 
-课程与教师五维评分统计由 `GET /api/v1/reviews/statistics` 提供。客户端对 2–5 门课程分别读取 reviews 统计，组合展示课程对比。
+HTTP 接口采用 OpenAPI 0.4.0，Go 和 TypeScript SDK 位于 [sdk](sdk)。HTTP、内容事件和活动事件的定义位于 [contracts](contracts)。
 
-OpenAPI 版本为 0.4.0，接口定义位于 [contracts/search.openapi.json](contracts/search.openapi.json)，Go 和 TypeScript SDK 位于 `sdk/`。详细数据约定、事件协议及装配方式见 [模块说明](docs/spec/search.md)。
-
-内容投影事件契约见 [contracts/discovery-event.schema.json](contracts/discovery-event.schema.json)；热门活动由 catalog（浏览）、reviews（评价与互动）、favorites（收藏）分别提供日快照，契约见 [contracts/discovery-activity.schema.json](contracts/discovery-activity.schema.json)（1.2.0），两份 Schema 摘要均记录于相邻 `.sha256` 文件并由模块检查校验。
+- [搜索与热门发现规格](docs/spec/search.md)说明排序、分页、当前权限和投影规则。
+- [装配指南](docs/guide/integration.md)说明来源端口、数据库权限和事件投递。
+- [实施状态](docs/development/implementation.md)记录场景覆盖、生产启用情况和待验证事项。
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm run hooks
-make generate
+make setup
 bash scripts/check-with-postgres.sh
 ```
 
-数据库检查创建独立、仅 Unix socket 可访问的 PostgreSQL 集群，退出时清理。可用 `STUHELPER_TEST_PG_BIN` 指定 PostgreSQL 二进制目录。每项测试创建独立数据库，不连接业务数据库。
+检查脚本创建仅监听独立 Unix socket 的 PostgreSQL 集群，采用内建 `C.UTF-8` locale，退出时清理。默认从 Debian 系的 `postgresql` 软件包定位程序，也可用 `STUHELPER_TEST_PG_BIN` 指定二进制目录。
 
-公开仓库为 [StuHelper/stuhelper-search](https://github.com/StuHelper/stuhelper-search)，默认分支为 `develop`。
+修改 OpenAPI 后运行 `make generate`。使用 `pnpm run hooks` 安装 Lefthook。
