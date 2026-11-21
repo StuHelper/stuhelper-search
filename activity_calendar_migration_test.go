@@ -28,17 +28,20 @@ func TestActivityCalendarMigrationRollbackAndRebuild(t *testing.T) {
 	add(t, svc, f, course)
 	old := activity("catalog", "course", course.Target.ID, "2026-11-09", map[string]int64{"views": 9})
 	old.Revision = 99
-	payload, err := json.Marshal(old)
-	if err != nil {
-		t.Fatal(err)
+	retired := activity("catalog", "course", course.Target.ID, "2025-11-08", map[string]int64{"views": 20})
+	for _, legacy := range []s.ActivitySnapshot{old, retired} {
+		payload, err := json.Marshal(legacy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`INSERT INTO search.activities(source,id,kind,object_id,day,revision,data)
+			VALUES($1,$2,$3,$4,$5::date,$6,$7)`,
+			legacy.Source, legacy.ID, legacy.Target.Kind, legacy.Target.ID, legacy.Day, legacy.Revision, payload); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, err := db.Exec(`WITH legacy_activity AS (
-			INSERT INTO search.activities(source,id,kind,object_id,day,revision,data)
-			VALUES($1,$2,$3,$4,$5::date,$6,$7) RETURNING source
-		)
-		INSERT INTO search.inbox(source,event_type,id,digest)
-		SELECT source,$8,'utc-event','utc-event-digest' FROM legacy_activity`,
-		old.Source, old.ID, old.Target.Kind, old.Target.ID, old.Day, old.Revision, payload, s.LegacyActivityEventType); err != nil {
+	if _, err := db.Exec(`INSERT INTO search.inbox(source,event_type,id,digest)
+		VALUES($1,$2,'utc-event','utc-event-digest')`, old.Source, s.LegacyActivityEventType); err != nil {
 		t.Fatal(err)
 	}
 	oldToken, err := repo.SaveRanking(ctx, []s.Target{course.Target}, now, 24*time.Hour)
@@ -72,6 +75,7 @@ func TestActivityCalendarMigrationRollbackAndRebuild(t *testing.T) {
 	}
 	assertState("Asia/Shanghai", false, 0)
 	assertArchive("UTC", old.ID, 9)
+	assertArchive("UTC", retired.ID, 20)
 	if _, err := repo.ResumeRanking(ctx, oldToken, now, 24*time.Hour); !errors.Is(err, s.ErrSnapshotExpired) {
 		t.Fatalf("legacy ranking: %v", err)
 	}
@@ -149,6 +153,10 @@ func TestActivityCalendarMigrationRollbackAndRebuild(t *testing.T) {
 	assertState("Asia/Shanghai", false, 0)
 	assertArchive("UTC", old.ID, 16)
 	assertArchive("Asia/Shanghai", shanghaiNext.ID, 7)
+	var stale int
+	if err := db.QueryRow(`SELECT count(*) FROM search.activity_calendar_archive WHERE calendar='UTC' AND id=$1`, retired.ID).Scan(&stale); err != nil || stale != 0 {
+		t.Fatalf("previous archive was not replaced: stale=%d err=%v", stale, err)
+	}
 }
 
 func TestActivityCalendarArchiveDeniesRuntimeCRUD(t *testing.T) {

@@ -42,10 +42,11 @@ func switchActivityCalendar(ctx context.Context, tx *sql.Tx, calendar string) er
 	if err := lock(ctx, tx); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM search.activity_calendar_archive WHERE calendar=$1", current); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO search.activity_calendar_archive(calendar,source,id,kind,object_id,day,revision,data)
- SELECT $1,source,id,kind,object_id,day,revision,data FROM search.activities
- ON CONFLICT(calendar,source,id) DO UPDATE
- SET kind=EXCLUDED.kind,object_id=EXCLUDED.object_id,day=EXCLUDED.day,revision=EXCLUDED.revision,data=EXCLUDED.data`, current); err != nil {
+ SELECT $1,source,id,kind,object_id,day,revision,data FROM search.activities`, current); err != nil {
 		return err
 	}
 	// Source snapshots are authoritative after the switch. Previous rankings use the old calendar.

@@ -46,7 +46,9 @@ updated: 2026-11-21
 
 切换事务将原活动快照写入 `search.activity_calendar_archive`，清空活动投影和热门排行，标记索引未就绪。首次重建回填最近 366 个北京时间日期，扩大热度窗口时可直接查询这段历史。旧热门游标返回 `410 snapshot_expired`。同一日历重复迁移保留活动与排行。
 
-归档按日历、来源和活动 ID 留存最近一次快照，用于核对。表启用行级安全，应用运行身份无法查看或写入归档。回退期结束后，迁移身份可以清理归档。日常活动清理处理当前投影。
+归档按日历整批替换，保留该日历最近一次切换前的快照，供切换和回退核对。回填从权威来源读取。表启用行级安全，应用运行身份无法查看或写入归档。日常活动清理只处理当前投影。
+
+归档保留到本次发布的回退期结束。迁移身份可按已结束的日历清理，例如 `DELETE FROM search.activity_calendar_archive WHERE calendar = 'UTC'`。
 
 回退时暂停同一批进程，使用新版 backend 的 `business-migrate --rollback-activity-calendar --modules catalog,reviews,favorites,search`，并传入已有的私有迁移 DSN 文件。命令先将活动来源切回 UTC，再调用 `postgres.RollbackActivityCalendar`。
 
