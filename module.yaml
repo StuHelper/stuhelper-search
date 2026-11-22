@@ -20,6 +20,8 @@ optional:
 capabilities:
   - search.query
   - search.projection
+specifications:
+  - docs/spec/search.md
 scenario_tests:
   DS-COURSE-01:
     - course_search_test.go#TestCourseSearchIncludesCurrentFormerAndEnglishNames
@@ -31,6 +33,7 @@ scenario_tests:
     - integration_test.go#TestVisibilityPaginationAndHotTargets
     - popular_scale_test.go#TestPopularKeysetCursorSurvivesScoreChangeAndRemoval
     - httpapi_contract_test.go#TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed
+    - httpapi_contract_test.go#TestAuthenticatedDenialIsDeclaredAndDecodedOnAllRoutes
     - index_collation_cursor_test.go#TestIndexOrderUnicodeCollationOpaqueCursorAndSchoolQueryRules
     - error_window_test.go#TestErrorCodeEnumRetryAfterAndPopularWindowDays
     - filter_summary_test.go#TestSummaryFieldsAndMultiDimensionalFilters
@@ -39,8 +42,11 @@ scenario_tests:
     - sdk_contract_test.go#TestSDKEndToEndContractAndPopularSnapshotPagination
     - integration_test.go#TestMyVotesHTTPAndTimeout
     - httpapi_contract_test.go#TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed
+    - httpapi_contract_test.go#TestAuthenticatedDenialIsDeclaredAndDecodedOnAllRoutes
     - filter_summary_test.go#TestMyVotesSummaryFieldsAndBoundedPageFill
   DS-05:
+    - activity_window_test.go#TestPopularBeijingCalendarWindow
+    - popular_cursor_test.go#TestPopularLegacyUTCCursorExpires
     - popular_scale_test.go#TestPopularFixedSnapshotRenewalExpiryAndRevocation
     - activity_test.go#TestHeatWeightsWindowAndTeachers
     - activity_test.go#TestActivityOwnership
@@ -49,11 +55,14 @@ scenario_tests:
     - activity_test.go#TestPopularCountsNewerLiveActivityRevisionWithoutDroppingHotTargets
     - resource_popular_recent_test.go#TestPopularResourcesAndRecentDiscovery
   DS-06:
+    - activity_window_test.go#TestLegacyActivityReplayCannotOverwriteBeijingCounters
     - sdk_contract_test.go#TestSharedAdvisoryLockAllowsConcurrentMultiSourceWrites
     - integration_test.go#TestProjectionFailureRollback
     - activity_test.go#TestActivityReplayAndRebuild
     - validation_inbox_test.go#TestUTF8NullValidationUnicodeLengthsAndInboxCanonicalDedup
   DS-07:
+    - activity_calendar_migration_test.go#TestActivityCalendarMigrationRollbackAndRebuild
+    - activity_calendar_migration_test.go#TestActivityCalendarArchiveDeniesRuntimeCRUD
     - validation_inbox_test.go#TestLegacyInboxReceiptsProtectBothEventTypes
     - observability_maintenance_test.go#TestSanitizedObservationsAcrossSnapshotPages
     - integration_test.go#TestContentDocumentKinds
@@ -64,7 +73,6 @@ scenario_tests:
     - validation_inbox_test.go#TestUTF8NullValidationUnicodeLengthsAndInboxCanonicalDedup
     - migration_runtime_test.go#TestIdempotentMigrateLockFreeAndStrictRuntimePrivilegeChecks
     - observability_maintenance_test.go#TestObserverStatusAndBoundedMaintenanceCleanup
-
   DS-SCHOOL-01:
     - school_search_test.go#TestSchoolSearchCodesNamesAliasesCurrentRightsAndRebuild
     - school_search_test.go#TestSchoolProjectionMigrationPreservesExistingDocuments

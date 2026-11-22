@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	s "github.com/StuHelper/stuhelper-search"
 	"github.com/StuHelper/stuhelper-search/httpapi"
 	"github.com/StuHelper/stuhelper-search/sdk"
@@ -130,4 +131,43 @@ func TestHTTPQueryParsingAuthFaultsCancellationAndMethodNotAllowed(t *testing.T)
 	if err != nil || resp.StatusCode() != http.StatusOK || resp.JSON200 == nil || len(resp.JSON200.Items) != 1 || resp.JSON200.Items[0].Target.Id != "course-1" {
 		t.Fatalf("SDK search failed: status=%v body=%v err=%v", resp.StatusCode(), resp.JSON200, err)
 	}
+}
+
+func TestAuthenticatedDenialIsDeclaredAndDecodedOnAllRoutes(t *testing.T) {
+	srv := httptest.NewServer(httpapi.Handler{
+		Service: &s.Service{},
+		Authenticate: func(*http.Request) (string, error) {
+			return "", fmt.Errorf("account access denied: %w", s.ErrForbidden)
+		},
+	})
+	defer srv.Close()
+	client, err := sdk.NewClientWithResponses(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := t.Context()
+	assertDenied := func(status int, body *sdk.Error) {
+		t.Helper()
+		if status != http.StatusForbidden || body == nil || body.Code != sdk.PermissionDenied {
+			t.Errorf("got status %d, body %+v; want 403 permission_denied", status, body)
+		}
+	}
+	searchResult, err := client.SearchWithResponse(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDenied(searchResult.StatusCode(), searchResult.GetJSON403())
+
+	popularResult, err := client.PopularWithResponse(ctx, &sdk.PopularParams{Kind: sdk.PopularParamsKindCourse})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDenied(popularResult.StatusCode(), popularResult.GetJSON403())
+
+	votesResult, err := client.MyVotesWithResponse(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDenied(votesResult.StatusCode(), votesResult.GetJSON403())
 }

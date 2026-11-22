@@ -181,8 +181,9 @@ func TestPopularCampusScaleDisabledSourceAndLazyCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	days := []string{"2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-07", "2026-11-08", "2026-11-09"}
-	for i := 0; i < 450; i++ {
+	const courses = 480
+	days := []string{"2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-07", "2026-11-08", "2026-11-09"}
+	for i := 0; i < courses; i++ {
 		id := fmt.Sprintf("course-%03d", i)
 		f.docs[s.Target{Source: "catalog", Kind: "course", ID: id}] = doc("catalog", "course", id)
 		for _, day := range days {
@@ -198,8 +199,8 @@ func TestPopularCampusScaleDisabledSourceAndLazyCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	var totalRows int
-	if err := db.QueryRow("SELECT count(*) FROM search.activities WHERE (data->>'visible')::boolean").Scan(&totalRows); err != nil || totalRows != 450*8*3 {
-		t.Fatalf("expected 10800 activity snapshots, got %d err=%v", totalRows, err)
+	if err := db.QueryRow("SELECT count(*) FROM search.activities WHERE (data->>'visible')::boolean").Scan(&totalRows); err != nil || totalRows != courses*len(days)*3 {
+		t.Fatalf("expected %d activity snapshots, got %d err=%v", courses*len(days)*3, totalRows, err)
 	}
 
 	// 1. Legacy single-item Sources fallback: disabled source skipped after 1 call, Current called only 20 times.
@@ -209,7 +210,7 @@ func TestPopularCampusScaleDisabledSourceAndLazyCurrent(t *testing.T) {
 
 	page, err := svc.Popular(ctx, "u", "course", "", 20)
 	if err != nil {
-		t.Fatalf("Popular failed on 10,800 snapshots (450 courses): %v", err)
+		t.Fatalf("Popular failed on %d snapshots (%d courses): %v", totalRows, courses, err)
 	}
 	if len(page.Items) != 20 || page.Items[0].Target.ID != "course-000" || page.Items[19].Target.ID != "course-019" {
 		t.Fatalf("unexpected top 20 items: count=%d", len(page.Items))
@@ -284,8 +285,13 @@ func TestPopularFixedSnapshotRenewalExpiryAndRevocation(t *testing.T) {
 	}
 	f.denied["u/b"] = true
 	clock = clock.Add(23 * time.Hour)
+	cfg.HeatWindow = 30 * 24 * time.Hour
+	svc, err = s.New(repo, f, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	second, err := svc.Popular(ctx, "u", "course", first.NextCursor, 1)
-	if err != nil || len(second.Items) != 1 || second.Items[0].Target.ID != "c" {
+	if err != nil || len(second.Items) != 1 || second.Items[0].Target.ID != "c" || second.WindowDays != 7 {
 		t.Fatalf("fixed order with revoked b: %+v %v", second, err)
 	}
 	if _, err = svc.Popular(ctx, "other", "course", second.NextCursor, 1); !errors.Is(err, s.ErrInput) {

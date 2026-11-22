@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	s "github.com/StuHelper/stuhelper-search"
+	"github.com/StuHelper/stuhelper-search/internal/activityday"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"strings"
 	"sync"
@@ -74,6 +75,9 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		return e
 	}
 	if _, e = tx.ExecContext(ctx, Schema); e != nil {
+		return e
+	}
+	if e = switchActivityCalendar(ctx, tx, activityday.Zone); e != nil {
 		return e
 	}
 	key := make([]byte, 32)
@@ -437,6 +441,13 @@ func (r *Repository) RebuildWindow(ctx context.Context, from, to time.Time, load
 	return r.RebuildWindowAt(ctx, time.Time{}, from, to, load)
 }
 
+// ActivityBackfillRequired reports whether the first rebuild must warm all supported dates.
+func (r *Repository) ActivityBackfillRequired(ctx context.Context) (bool, error) {
+	var pending bool
+	err := r.DB.QueryRowContext(ctx, "SELECT NOT ready FROM search.state WHERE id").Scan(&pending)
+	return pending, safe(err)
+}
+
 func (r *Repository) RebuildWindowAt(ctx context.Context, rebuiltAt, from, to time.Time, load func(func([]s.Document) error, func([]s.ActivitySnapshot) error) error) error {
 	tx, e := r.DB.BeginTx(ctx, nil)
 	if e != nil {
@@ -450,8 +461,10 @@ func (r *Repository) RebuildWindowAt(ctx context.Context, rebuiltAt, from, to ti
 	if _, e = tx.ExecContext(ctx, `UPDATE search.documents SET data=jsonb_set(data,'{visible}','false') WHERE (data->>'visible')::boolean`); e != nil {
 		return safe(e)
 	}
+	var firstDay, afterLastDay string
 	if !from.IsZero() && !to.IsZero() {
-		_, e = tx.ExecContext(ctx, `UPDATE search.activities SET data=jsonb_set(data,'{visible}','false') WHERE day>=$1 AND day<$2 AND (data->>'visible')::boolean`, from.Format(time.DateOnly), to.Format(time.DateOnly))
+		firstDay, afterLastDay = activityday.Date(from), activityday.Date(to)
+		_, e = tx.ExecContext(ctx, `UPDATE search.activities SET data=jsonb_set(data,'{visible}','false') WHERE day>=$1::date AND day<$2::date AND (data->>'visible')::boolean`, firstDay, afterLastDay)
 	} else {
 		_, e = tx.ExecContext(ctx, `UPDATE search.activities SET data=jsonb_set(data,'{visible}','false') WHERE (data->>'visible')::boolean`)
 	}
@@ -469,7 +482,7 @@ func (r *Repository) RebuildWindowAt(ctx context.Context, rebuiltAt, from, to ti
 	if rebuiltAt.IsZero() {
 		_, e = tx.ExecContext(ctx, "UPDATE search.state SET ready=true, rebuilt_at=now() WHERE id")
 	} else {
-		_, e = tx.ExecContext(ctx, "UPDATE search.state SET ready=true, rebuilt_at=$1, activity_from=$2, activity_to=$3 WHERE id", rebuiltAt.UTC(), from.UTC().Format(time.DateOnly), to.UTC().Format(time.DateOnly))
+		_, e = tx.ExecContext(ctx, "UPDATE search.state SET ready=true, rebuilt_at=$1, activity_from=NULLIF($2,'')::date, activity_to=NULLIF($3,'')::date WHERE id", rebuiltAt.UTC(), firstDay, afterLastDay)
 	}
 	if e != nil {
 		return safe(e)
@@ -545,9 +558,10 @@ func (r *Repository) CheckRuntime(ctx context.Context) error {
 			SELECT c.relowner FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'search'
 		) SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolbypassrls OR rolreplication
 		OR has_schema_privilege(current_user, 'search', 'CREATE')
+		OR NOT EXISTS (SELECT 1 FROM search.state WHERE id AND activity_calendar=$1)
 		OR EXISTS (SELECT 1 FROM owners WHERE pg_has_role(current_user, owner,
 			CASE WHEN current_setting('server_version_num')::int >= 160000 THEN 'USAGE,SET' ELSE 'MEMBER' END))
-		FROM pg_roles WHERE rolname = current_user`).Scan(&unsafe)
+		FROM pg_roles WHERE rolname = current_user`, activityday.Zone).Scan(&unsafe)
 	if e != nil || unsafe {
 		return s.ErrUnavailable
 	}
@@ -575,6 +589,7 @@ func (r *Repository) CheckRuntime(ctx context.Context) error {
 		OR has_table_privilege(current_user, 'search.activities', 'TRUNCATE')
 		OR has_table_privilege(current_user, 'search.state', 'TRUNCATE')
  OR has_table_privilege(current_user, 'search.rankings', 'TRUNCATE')
+		OR has_table_privilege(current_user, 'search.activity_calendar_archive', 'TRUNCATE')
 		OR EXISTS (
 			SELECT 1 FROM pg_namespace
 			WHERE nspname NOT LIKE 'pg_%' AND nspname <> 'information_schema'

@@ -69,7 +69,8 @@ assert.equal(
   createHash('sha256').update(activityBytes).digest('hex') + '  discovery-activity.schema.json\n',
 );
 const activitySchema = JSON.parse(activityBytes);
-assert.equal(activitySchema['x-schema-version'], '1.2.0');
+assert.equal(activitySchema['x-schema-version'], '2.0.0');
+assert(activitySchema.oneOf.every((v) => v.properties.type.const === 'discovery.activity.v2'));
 assert.deepEqual(
   activitySchema.oneOf.map((v) => [v.properties.source.const, Object.keys(v.properties.data.properties.metrics.properties)]),
   [

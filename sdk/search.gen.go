@@ -23,6 +23,7 @@ const (
 	InvalidInput     ErrorCode = "invalid_input"
 	MethodNotAllowed ErrorCode = "method_not_allowed"
 	NotFound         ErrorCode = "not_found"
+	PermissionDenied ErrorCode = "permission_denied"
 	SnapshotExpired  ErrorCode = "snapshot_expired"
 	Timeout          ErrorCode = "timeout"
 	Unauthenticated  ErrorCode = "unauthenticated"
@@ -41,6 +42,8 @@ func (e ErrorCode) Valid() bool {
 	case MethodNotAllowed:
 		return true
 	case NotFound:
+		return true
+	case PermissionDenied:
 		return true
 	case SnapshotExpired:
 		return true
@@ -189,11 +192,11 @@ func (e PopularParamsKind) Valid() bool {
 
 // Error 稳定错误响应体，供客户端映射多语言文案与无障碍状态提示。
 type Error struct {
-	// Code 稳定错误码，包含参数非法、未登录、路径或方法不支持、索引构建中、依赖不可用、超时及请求取消。
+	// Code 稳定错误码，供客户端区分无有效登录会话、有效会话被拒绝及其他查询失败。
 	Code ErrorCode `json:"code"`
 }
 
-// ErrorCode 稳定错误码，包含参数非法、未登录、路径或方法不支持、索引构建中、依赖不可用、超时及请求取消。
+// ErrorCode 稳定错误码，供客户端区分无有效登录会话、有效会话被拒绝及其他查询失败。
 type ErrorCode string
 
 // Item 经当前权限复核后的公开搜索或热门结果条目。
@@ -237,7 +240,7 @@ type Page struct {
 	// NextCursor 下一页游标；仅当为空字符串时表示已到达末尾，非空时即使 items 为空仍可能存在后续页。
 	NextCursor string `json:"next_cursor"`
 
-	// WindowDays 热门排行统计覆盖的配置时间窗口天数；仅热门接口返回，搜索接口省略。
+	// WindowDays 热门排行首屏统计的北京时间（Asia/Shanghai）日期数，含今天和此前 N - 1 天，默认 30。仅热门接口返回。
 	WindowDays *int `json:"window_days,omitempty"`
 }
 
@@ -439,7 +442,7 @@ type ClientInterface interface {
 
 	// Popular 配置窗口内活动加权排行，同分按来源和 ID 排序
 	//
-	// 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。 同次翻页固定首屏排名，每页按当前权限返回内容。最后一次翻页满 24 小时后返回 410 snapshot_expired，需主动刷新。.
+	// 按后台权重汇总北京时间（Asia/Shanghai）今天及此前 window_days - 1 个日期的活动，包含今天已提交的计数。仅返回达到最低样本量且对当前请求人可见的目标。同次翻页沿用首屏排名和 window_days，每页复核当前权限。next_cursor 为空时分页结束。快照过期后返回 410 snapshot_expired，需刷新首屏。.
 	//
 	// Corresponds with GET /api/v1/search/popular (the `Popular` operationId).
 	Popular(ctx context.Context, params *PopularParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -481,7 +484,7 @@ func (c *Client) MyVotes(ctx context.Context, params *MyVotesParams, reqEditors 
 
 // Popular 配置窗口内活动加权排行，同分按来源和 ID 排序
 //
-// 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。 同次翻页固定首屏排名，每页按当前权限返回内容。最后一次翻页满 24 小时后返回 410 snapshot_expired，需主动刷新。.
+// 按后台权重汇总北京时间（Asia/Shanghai）今天及此前 window_days - 1 个日期的活动，包含今天已提交的计数。仅返回达到最低样本量且对当前请求人可见的目标。同次翻页沿用首屏排名和 window_days，每页复核当前权限。next_cursor 为空时分页结束。快照过期后返回 410 snapshot_expired，需刷新首屏。.
 //
 // Corresponds with GET /api/v1/search/popular (the `Popular` operationId).
 func (c *Client) Popular(ctx context.Context, params *PopularParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -850,7 +853,7 @@ type ClientWithResponsesInterface interface {
 
 	// PopularWithResponse 配置窗口内活动加权排行，同分按来源和 ID 排序
 	//
-	// 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。 同次翻页固定首屏排名，每页按当前权限返回内容。最后一次翻页满 24 小时后返回 410 snapshot_expired，需主动刷新。.
+	// 按后台权重汇总北京时间（Asia/Shanghai）今天及此前 window_days - 1 个日期的活动，包含今天已提交的计数。仅返回达到最低样本量且对当前请求人可见的目标。同次翻页沿用首屏排名和 window_days，每页复核当前权限。next_cursor 为空时分页结束。快照过期后返回 410 snapshot_expired，需刷新首屏。.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -877,6 +880,8 @@ type SearchResponse struct {
 	JSON400 *Error
 	// JSON401 the response for an HTTP 401 `application/json` response
 	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *Error
 	// JSON405 the response for an HTTP 405 `application/json` response
@@ -906,6 +911,11 @@ func (r SearchResponse) GetJSON400() *Error {
 // GetJSON401 returns the response for an HTTP 401 `application/json` response
 func (r SearchResponse) GetJSON401() *Error {
 	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r SearchResponse) GetJSON403() *Error {
+	return r.JSON403
 }
 
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
@@ -981,6 +991,8 @@ type MyVotesResponse struct {
 	JSON400 *Error
 	// JSON401 the response for an HTTP 401 `application/json` response
 	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *Error
 	// JSON405 the response for an HTTP 405 `application/json` response
@@ -1010,6 +1022,11 @@ func (r MyVotesResponse) GetJSON400() *Error {
 // GetJSON401 returns the response for an HTTP 401 `application/json` response
 func (r MyVotesResponse) GetJSON401() *Error {
 	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r MyVotesResponse) GetJSON403() *Error {
+	return r.JSON403
 }
 
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
@@ -1085,6 +1102,8 @@ type PopularResponse struct {
 	JSON400 *Error
 	// JSON401 the response for an HTTP 401 `application/json` response
 	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *Error
 	// JSON405 the response for an HTTP 405 `application/json` response
@@ -1116,6 +1135,11 @@ func (r PopularResponse) GetJSON400() *Error {
 // GetJSON401 returns the response for an HTTP 401 `application/json` response
 func (r PopularResponse) GetJSON401() *Error {
 	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r PopularResponse) GetJSON403() *Error {
+	return r.JSON403
 }
 
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
@@ -1209,7 +1233,7 @@ func (c *ClientWithResponses) MyVotesWithResponse(ctx context.Context, params *M
 
 // PopularWithResponse 配置窗口内活动加权排行，同分按来源和 ID 排序
 //
-// 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。 同次翻页固定首屏排名，每页按当前权限返回内容。最后一次翻页满 24 小时后返回 410 snapshot_expired，需主动刷新。.
+// 按后台权重汇总北京时间（Asia/Shanghai）今天及此前 window_days - 1 个日期的活动，包含今天已提交的计数。仅返回达到最低样本量且对当前请求人可见的目标。同次翻页沿用首屏排名和 window_days，每页复核当前权限。next_cursor 为空时分页结束。快照过期后返回 410 snapshot_expired，需刷新首屏。.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -1256,6 +1280,13 @@ func ParseSearchResponse(rsp *http.Response) (*SearchResponse, error) {
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest Error
@@ -1355,6 +1386,13 @@ func ParseMyVotesResponse(rsp *http.Response) (*MyVotesResponse, error) {
 		}
 		response.JSON401 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -1452,6 +1490,13 @@ func ParsePopularResponse(rsp *http.Response) (*PopularResponse, error) {
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest Error

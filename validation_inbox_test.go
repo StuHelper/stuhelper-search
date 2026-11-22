@@ -177,6 +177,7 @@ func TestLegacyInboxReceiptsProtectBothEventTypes(t *testing.T) {
 	docEvent.Time = d.At
 	a := activity("catalog", "course", "legacy-doc", "2026-11-09", map[string]int64{"views": 1})
 	actEvent := activityEvent(a, "legacy-act-id")
+	actEvent.Type = s.LegacyActivityEventType
 	actEvent.Time = d.At
 	if _, err := db.Exec(`DROP TABLE search.inbox; CREATE TABLE search.inbox(source text NOT NULL,id text NOT NULL,digest text NOT NULL,PRIMARY KEY(source,id))`); err != nil {
 		t.Fatal(err)

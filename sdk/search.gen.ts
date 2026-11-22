@@ -33,7 +33,7 @@ export interface paths {
         };
         /**
          * 配置窗口内活动加权排行，同分按来源和 ID 排序
-         * @description 汇总配置热度窗口内各已启用来源的日活动指标并按后台权重排序，仅返回达到最低样本量且对当前请求人可见的目标。响应始终附带 window_days 供前端解释统计口径。仅当 next_cursor 为空字符串时表示分页结束。 同次翻页固定首屏排名，每页按当前权限返回内容。最后一次翻页满 24 小时后返回 410 snapshot_expired，需主动刷新。
+         * @description 按后台权重汇总北京时间（Asia/Shanghai）今天及此前 window_days - 1 个日期的活动，包含今天已提交的计数。仅返回达到最低样本量且对当前请求人可见的目标。同次翻页沿用首屏排名和 window_days，每页复核当前权限。next_cursor 为空时分页结束。快照过期后返回 410 snapshot_expired，需刷新首屏。
          */
         get: operations["popular"];
         put?: never;
@@ -114,7 +114,7 @@ export interface components {
             items: components["schemas"]["Item"][];
             /** @description 下一页游标；仅当为空字符串时表示已到达末尾，非空时即使 items 为空仍可能存在后续页。 */
             next_cursor: string;
-            /** @description 热门排行统计覆盖的配置时间窗口天数；仅热门接口返回，搜索接口省略。 */
+            /** @description 热门排行首屏统计的北京时间（Asia/Shanghai）日期数，含今天和此前 N - 1 天，默认 30。仅热门接口返回。 */
             window_days?: number;
         };
         /** @description 请求人对单条课程评价的当前有效投票。 */
@@ -142,10 +142,10 @@ export interface components {
         /** @description 稳定错误响应体，供客户端映射多语言文案与无障碍状态提示。 */
         Error: {
             /**
-             * @description 稳定错误码，包含参数非法、未登录、路径或方法不支持、索引构建中、依赖不可用、超时及请求取消。
+             * @description 稳定错误码，供客户端区分无有效登录会话、有效会话被拒绝及其他查询失败。
              * @enum {string}
              */
-            code: "invalid_input" | "unauthenticated" | "not_found" | "method_not_allowed" | "unavailable" | "timeout" | "cancelled" | "index_building" | "snapshot_expired";
+            code: "invalid_input" | "unauthenticated" | "permission_denied" | "not_found" | "method_not_allowed" | "unavailable" | "timeout" | "cancelled" | "index_building" | "snapshot_expired";
         };
     };
     responses: never;
@@ -209,6 +209,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description 会话身份通过验证，但当前账号禁止访问，例如已完成注销（permission_denied）。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description 请求路径不存在（not_found）。 */
             404: {
                 headers: {
@@ -238,10 +247,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description 搜索索引正在初始化（index_building）或上游依赖暂不可用（unavailable）。 */
+            /** @description 搜索索引正在初始化（index_building），或身份验证、查询所需的依赖暂不可用（unavailable）。 */
             503: {
                 headers: {
-                    /** @description 建议客户端自动重试前等待的秒数。 */
+                    /** @description 建议客户端自动重试前等待的秒数。索引构建中为 10 秒，依赖暂不可用为 5 秒。 */
                     "Retry-After"?: string;
                     [name: string]: unknown;
                 };
@@ -305,6 +314,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description 会话身份通过验证，但当前账号禁止访问，例如已完成注销（permission_denied）。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description 请求路径不存在（not_found）。 */
             404: {
                 headers: {
@@ -343,10 +361,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description 搜索索引正在初始化（index_building）或活动来源暂不可用（unavailable）。 */
+            /** @description 搜索索引正在初始化（index_building），或身份验证、活动来源暂不可用（unavailable）。 */
             503: {
                 headers: {
-                    /** @description 建议客户端自动重试前等待的秒数。 */
+                    /** @description 建议客户端自动重试前等待的秒数。索引构建中为 10 秒，依赖暂不可用为 5 秒。 */
                     "Retry-After"?: string;
                     [name: string]: unknown;
                 };
@@ -406,6 +424,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description 会话身份通过验证，但当前账号禁止访问，例如已完成注销（permission_denied）。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description 请求路径不存在（not_found）。 */
             404: {
                 headers: {
@@ -435,10 +462,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description 评价来源暂不可用（unavailable）。 */
+            /** @description 身份验证或评价来源暂不可用（unavailable）。 */
             503: {
                 headers: {
-                    /** @description 建议客户端自动重试前等待的秒数。 */
+                    /** @description 建议客户端自动重试前等待的秒数。依赖暂不可用时为 5 秒。 */
                     "Retry-After"?: string;
                     [name: string]: unknown;
                 };
