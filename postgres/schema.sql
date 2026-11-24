@@ -150,3 +150,29 @@ CREATE TABLE IF NOT EXISTS search.rankings (
  expires_at timestamptz NOT NULL
 );
 REVOKE ALL ON search.rankings FROM PUBLIC;
+
+CREATE TABLE IF NOT EXISTS search.retired_sources (source text PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS search.document_holds (
+ source text NOT NULL,id text NOT NULL,case_ref text NOT NULL,basis text NOT NULL,purpose text NOT NULL,end_condition text NOT NULL,
+ review_at timestamptz NOT NULL,until_at timestamptz NOT NULL CHECK(isfinite(until_at) AND review_at<=until_at),
+ PRIMARY KEY(source,id,case_ref),FOREIGN KEY(source,id) REFERENCES search.documents(source,id) ON DELETE CASCADE
+);
+REVOKE ALL ON search.document_holds FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION search.retire_confirmed_revision(p_source text,p_id text,p_revision bigint)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE stored bigint; visible boolean;
+BEGIN
+ IF p_source NOT IN ('catalog','reviews','resources') OR p_id IS NULL OR p_id='' OR p_revision IS NULL OR p_revision<1 THEN
+   RAISE EXCEPTION 'invalid retirement' USING ERRCODE='22023';
+ END IF;
+ PERFORM pg_advisory_xact_lock(726391840130);
+ SELECT d.revision,(d.data->>'visible')::boolean INTO stored,visible FROM search.documents d
+  WHERE d.source=p_source AND d.id=p_id FOR UPDATE;
+ IF FOUND AND (stored<p_revision OR (stored=p_revision AND visible)) THEN RETURN false; END IF;
+ IF EXISTS(SELECT 1 FROM search.document_holds h WHERE h.source=p_source AND h.id=p_id AND h.until_at>statement_timestamp()) THEN RETURN false; END IF;
+ INSERT INTO search.retired_sources(source) VALUES(p_source) ON CONFLICT DO NOTHING;
+ IF stored=p_revision THEN DELETE FROM search.documents WHERE source=p_source AND id=p_id AND revision=p_revision; END IF;
+ RETURN true;
+END $$;
+REVOKE ALL ON FUNCTION search.retire_confirmed_revision(text,text,bigint) FROM PUBLIC;
