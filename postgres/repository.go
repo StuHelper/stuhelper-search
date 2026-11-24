@@ -26,9 +26,12 @@ func validDBString(v string) bool {
 var Schema string
 
 type Repository struct {
-	DB        *sql.DB
-	mu        sync.Mutex
-	cursorKey []byte
+	// CheckFirstRevision reads the current source revision for objects no longer
+	// represented locally after terminal retention has started for that source.
+	CheckFirstRevision func(context.Context, string, string) (int64, error)
+	DB                 *sql.DB
+	mu                 sync.Mutex
+	cursorKey          []byte
 }
 
 func splitAfter(after string) (string, string, bool) {
@@ -171,6 +174,23 @@ func replayed(ctx context.Context, tx *sql.Tx, source, eventType, id, digest str
 }
 func (r *Repository) Apply(ctx context.Context, event s.Event, digest string) error {
 	return r.withInboxTx(ctx, event.Source, event.Type, event.ID, digest, event, func(tx *sql.Tx) error {
+		var verify bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM search.retired_sources WHERE source=$1) AND
+    NOT EXISTS(SELECT 1 FROM search.documents WHERE source=$1 AND id=$2)`, event.Source, event.Data.Target.ID).Scan(&verify); err != nil {
+			return err
+		}
+		if verify {
+			if r.CheckFirstRevision == nil {
+				return s.ErrUnavailable
+			}
+			revision, err := r.CheckFirstRevision(ctx, event.Source, event.Data.Target.ID)
+			if err != nil {
+				return err
+			}
+			if revision != event.Data.Revision {
+				return nil
+			}
+		}
 		return put(ctx, tx, event.Data, false)
 	})
 }
