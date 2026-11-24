@@ -196,13 +196,19 @@ func TestProjectionReplayRebuildAndIsolation(t *testing.T) {
 	if e = repo.CheckRuntime(ctx); e == nil {
 		t.Fatal("migration owner accepted")
 	}
-	_, e = db.Exec(`CREATE ROLE search_runtime NOLOGIN; GRANT USAGE ON SCHEMA search TO search_runtime; GRANT SELECT,INSERT,UPDATE ON search.rankings,search.documents,search.activities,search.state TO search_runtime; GRANT SELECT,INSERT ON search.inbox TO search_runtime; CREATE SCHEMA source_private; CREATE TABLE source_private.secret(id int)`)
+	runtimeRole := fmt.Sprintf("search_runtime_%d", time.Now().UnixNano())
+	_, e = db.Exec(fmt.Sprintf(`CREATE ROLE %[1]s NOLOGIN; GRANT USAGE ON SCHEMA search TO %[1]s; GRANT SELECT ON search.retired_sources TO %[1]s; GRANT SELECT(source,id,until_at) ON search.document_holds TO %[1]s; GRANT EXECUTE ON FUNCTION search.retire_confirmed_revision(text,text,bigint) TO %[1]s; GRANT SELECT,INSERT,UPDATE ON search.rankings,search.documents,search.activities,search.state TO %[1]s; GRANT SELECT,INSERT ON search.inbox TO %[1]s; CREATE SCHEMA source_private; CREATE TABLE source_private.secret(id int)`, runtimeRole))
 	if e != nil {
 		t.Fatal(e)
 	}
+	t.Cleanup(func() {
+		if _, err := db.Exec("RESET ROLE; DROP OWNED BY " + runtimeRole + "; DROP ROLE " + runtimeRole); err != nil {
+			t.Error(err)
+		}
+	})
 	// Dedicated single connection uses runtime role throughout checks and writes.
 	db.SetMaxOpenConns(1)
-	if _, e = db.Exec("SET ROLE search_runtime"); e != nil {
+	if _, e = db.Exec("SET ROLE " + runtimeRole); e != nil {
 		t.Fatal(e)
 	}
 	if e = repo.CheckRuntime(ctx); e != nil {
@@ -378,5 +384,54 @@ func TestContentDocumentKinds(t *testing.T) {
 	}
 	if err := db.QueryRow("SELECT count(*) FROM search.documents").Scan(&count); err != nil || count != 4 {
 		t.Fatal(count, err)
+	}
+}
+
+func TestRetiredSourceChecksNewInsertAndDoesNotRestoreStaleContent(t *testing.T) {
+	svc, repo, f, db := setup(t)
+	ctx := t.Context()
+	d := doc("catalog", "course", "synthetic")
+	d.Revision = 2
+	d.Visible = false
+	add(t, svc, f, d)
+	repo.CheckFirstRevision = func(context.Context, string, string) (int64, error) { return 0, nil }
+	yes, err := repo.ConfirmHiddenRevision(ctx, "catalog", d.Target.ID, 2)
+	if err != nil || !yes {
+		t.Fatal(yes, err)
+	}
+	if _, err = db.Exec(`INSERT INTO search.document_holds(source,id,case_ref,basis,purpose,end_condition,review_at,until_at) VALUES('catalog',$1,'case','review','verify','resolution',now(),now()+interval '1 day')`, d.Target.ID); err != nil {
+		t.Fatal(err)
+	}
+	yes, err = repo.RetireConfirmedRevision(ctx, "catalog", d.Target.ID, 2)
+	if err != nil || yes {
+		t.Fatal("ignored hold", err)
+	}
+	if _, err = db.Exec("DELETE FROM search.document_holds WHERE id=$1", d.Target.ID); err != nil {
+		t.Fatal(err)
+	}
+	yes, err = repo.RetireConfirmedRevision(ctx, "catalog", d.Target.ID, 2)
+	if err != nil || !yes {
+		t.Fatal(yes, err)
+	}
+	yes, err = repo.RetireConfirmedRevision(ctx, "catalog", d.Target.ID, 2)
+	if err != nil || !yes {
+		t.Fatal("retry", err)
+	}
+	d.Revision = 1
+	d.Visible = true
+	if err := svc.Consume(ctx, event(d, "delayed-event")); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := db.QueryRow("SELECT count(*) FROM search.documents WHERE source='catalog' AND id=$1", d.Target.ID).Scan(&count); err != nil || count != 0 {
+		t.Fatal("restored stale projection", count, err)
+	}
+	d.Revision = 3
+	repo.CheckFirstRevision = func(context.Context, string, string) (int64, error) { return 3, nil }
+	if err := svc.Consume(ctx, event(d, "newer")); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow("SELECT count(*) FROM search.documents WHERE id=$1 AND revision=3", d.Target.ID).Scan(&count); err != nil || count != 1 {
+		t.Fatal("new revision rejected", count, err)
 	}
 }
